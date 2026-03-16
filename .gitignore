@@ -1,6 +1,7 @@
 # --- 1. 敏感資訊 (Security) ---
 config.json
 Corefile
+*.db
 
 # --- 2. 紀錄與報告 (Logs & Reports) ---
 report/

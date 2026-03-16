@@ -1,98 +1,61 @@
-# 🛡️ Olivia DNS 流量守護系統
+# DNS Monitor & Family Protector 🛡️
 
-這套系統建構於 macOS 環境，結合 **CoreDNS**、**Python** 與 **Telegram Bot**，實現全自動的網路連線即時監控與每日彙整報告。
+這是一套基於 macOS (iMac-Server) 運作的家庭 DNS 監控系統，結合了 **CoreDNS** 進行日誌收集、**Python** 背景守護進程，以及 **Telegram Bot** 即時通報與每日分析。
 
-## 🏗️ 系統架構
+## 🚀 系統架構
 
-* **錄影機 (CoreDNS)**：透過 `LaunchDaemon` 背景執行，即時將 DNS 請求寫入 `dns_query.log`。
-* **巡邏員 (watcher.py)**：即時追蹤 Log，發現新網域立刻透過 Telegram 通知，並備份紀錄。
-* **彙整員 (analyzer.py)**：由 `crontab` 定期觸發，每天早上彙整前一天的所有新網域連線。
-* **資料庫 (report/)**：存放每日發送過的報告內容（`.flag`），作為備份與狀態鎖。
+* **DNS Server**: 使用 CoreDNS 攔截並記錄家庭設備的 DNS 查詢。
+* **Watcher**: `watcher.py` 透過 `launchd` 在背景 24/7 運作，解析日誌並同步至 SQLite。
+* **Database**: 使用 SQLite 存儲設備清單與通報金鑰 (Telegram Token/ChatID)。
+* **Analyzer**: `analyzer.py` 提供手動與自動分析功能，計算查詢佔比並發送 Telegram 報表。
 
----
+## 🛠️ 安裝與設定
 
-## 📂 目錄結構
+### 1. 初始化資料庫
 
-所有檔案均位於：`~/dns-monitor/`
-
-```text
-.
-├── analyzer.py            # 每日彙整腳本 (Crontab 執行)
-├── watcher.py             # 即時監控腳本 (手動或背景執行)
-├── config.json            # 敏感設定 (Token, Chat ID) - 不上 Git
-├── config.json.example    # 設定檔範本
-├── Corefile               # CoreDNS 邏輯配置
-├── my_whitelist.txt       # 排除不記錄的白名單網域
-├── dns_query.log          # 原始 DNS 連線日誌
-├── notified_history.txt   # 已通知過的歷史紀錄 (防止重複)
-├── report/                # 存放發送過的報告內容 (*.flag) - 不上 Git
-└── README.md              # 專案說明文件
-
-```
-
----
-
-## 🔧 核心指令手冊
-
-### 1. 服務啟動與維護 (CoreDNS)
-
-當您修改了 `Corefile` 或 `my_whitelist.txt` 時，必須重啟服務：
+執行以下腳本建立 `devices` 與 `dns_logs` 表格：
 
 ```bash
-# 重新載入並啟動
-sudo launchctl unload /Library/LaunchDaemons/com.coredns.monitor.plist
-sudo launchctl load -w /Library/LaunchDaemons/com.coredns.monitor.plist
-
-# 檢查進程是否活著 (應顯示 /opt/homebrew/bin/coredns)
-ps aux | grep coredns
+python3 init_db.py
 
 ```
 
-### 2. 啟動即時監控 (Watcher)
+> **注意**：請至 `devices` 表格填入您的 Telegram Bot Token 與 Chat ID 才能接收通報。
 
-建議在終端機開啟一個視窗執行，或放入背景：
+### 2. 啟動背景監控 (macOS)
+
+系統使用 `launchd` 管理，確保開機自動啟動與崩潰自動重啟：
 
 ```bash
-python3 ~/dns-monitor/watcher.py
+launchctl load ~/Library/LaunchAgents/com.charlie.dns-watcher.plist
 
 ```
 
-### 3. 手動觸發每日彙整 (Analyzer)
+### 3. 設定每日自動分析 (Cron Job)
 
-測試是否能正確讀取昨天的紀錄並發報：
+透過 `crontab -e` 加入排程，每日 23:00 發送當日報表：
 
 ```bash
-python3 ~/dns-monitor/analyzer.py
+0 23 * * * /usr/bin/python3 ~/dns-monitor/analyzer.py
 
 ```
 
----
+## 📊 使用方法
 
-## ⏰ 自動化排程 (Crontab)
+### 手動回溯特定日期
 
-確保系統每 30 分鐘自動檢查一次是否有漏掉的報告。執行 `crontab -e` 並確認內容：
+若需要查詢過去某天的數據，可帶入日期參數：
 
-```text
-*/30 * * * * /usr/bin/python3 /Users/miyukian/dns-monitor/analyzer.py >> /Users/miyukian/dns-monitor/cron_log.log 2>&1
+```bash
+python3 analyzer.py 2026-03-16
 
 ```
 
----
+### 設備管理
 
-## 🛡️ 安全性與 Git 規範
+當新設備連接時，系統會自動在資料庫建立 `Unknown Device` 紀錄。您可以透過 **DB Browser for SQLite** 修改 `device_name` 並設定是否開啟該設備的 Telegram 通知。
 
-本專案已設定 `.gitignore`，請確保以下敏感資訊不會上傳至 GitHub：
+## 🔒 隱私與安全
 
-1. **`config.json`**：內含 Telegram Bot Token。
-2. **`report/`**：內含實際的瀏覽紀錄備份。
-3. **`*.log`**：連線原始紀錄。
-
-**初次部署時：**
-請將 `config.json.example` 複製為 `config.json` 並填入正確的 Token。
-
----
-
-## 💡 日常維護
-
-* **清空日誌**：若 `dns_query.log` 過大，執行 `> ~/dns-monitor/dns_query.log`。
-* **檢查備份**：您可以到 `report/` 資料夾查看過去每一天發送給您的 Telegram 訊息備份。
+* 資料皆存儲於本地 SQLite 資料庫，不外傳。
+* 僅針對資料庫中設有有效金鑰的帳號發送通報。
