@@ -1,0 +1,27 @@
+# --- 1. 敏感資訊 (Security) ---
+config.json
+Corefile
+
+# --- 2. 紀錄與報告 (Logs & Reports) ---
+report/
+*.log
+dns_query.log
+notified_history.txt
+
+# --- 3. Python 暫存檔 (Python Cleanup) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# --- 4. macOS 系統檔案 (System Files) ---
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# --- 5. VS Code 設定 (IDE) ---
+.vscode/
