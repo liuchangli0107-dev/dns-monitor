@@ -66,11 +66,11 @@ sudo launchctl list | grep dns-watcher
 
 ### 每日報表推送
 
-每日 **00:05** 自動統計「昨日」數據並發送 Telegram 通報：
+每 30 分鐘 執行一次 自動統計「昨日」數據並發送 Telegram 通報：
 
 ```bash
 # 執行 crontab -e 加入以下內容
-5 0 * * * /usr/bin/python3 /Users/YOURNAE/dns-monitor/analyzer.py >> /Users/YOURNAE/dns-monitor/analyzer.log 2>&1
+*/30 * * * * /usr/bin/python3 /Users/YOURNAE/dns-monitor/analyzer.py >> /Users/YOURNAE/dns-monitor/analyzer.log 2>&1
 
 ```
 
