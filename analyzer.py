@@ -10,7 +10,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
 def get_db_connection():
-    """建立連線並加入 timeout 解決併發鎖定問題"""
+    """建立連線並設定 Row Factory 方便讀取欄位"""
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
@@ -32,88 +32,77 @@ def send_telegram(token, chat_id, message):
         else:
             print(f"❌ Telegram 發送失敗: {response.text}")
     except Exception as e:
-        print(f"⚠️ 發送嘗試出錯: {e}")
+        print(f"⚠️ 發送報表時出錯: {e}")
     return False
 
 def analyze_and_report(target_date=None):
     """執行分析並發送報表"""
-    # 邏輯修正：如果沒帶參數，自動設定為「昨天」
+    is_manual = target_date is not None
     if not target_date:
+        # 預設分析昨天的數據
         target_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        is_manual = False
-    else:
-        is_manual = True
     
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # --- 1. 取得總查詢量 ---
-    cursor.execute("SELECT COUNT(l.id) FROM dns_logs l LEFT JOIN devices d ON d.ip_address = l.client_ip WHERE DATE(l.timestamp) = ? AND d.owner != 'Charlie'", (target_date,))
+    # 判斷輸入格式：如果是 10 字元則是日期，超過則視為包含小時
+    # 這裡使用 LIKE 來相容 '2026-03-17%' 或 '2026-03-17 15%'
+    search_pattern = f"{target_date}%"
+
+    # --- 1. 取得指定時間總查詢量 ---
+    cursor.execute("SELECT COUNT(*) FROM dns_logs WHERE timestamp LIKE ?", (search_pattern,))
     total_queries = cursor.fetchone()[0]
 
-    # --- 2. 取得配置 ---
+    # --- 2. 取得 Telegram 配置 ---
     cursor.execute("SELECT telegram_token, telegram_chat_id FROM devices WHERE telegram_token IS NOT NULL LIMIT 1")
     config = cursor.fetchone()
-    
-    # --- 3. 執行統計查詢 (LEFT JOIN) ---
-    query_device = """
-    SELECT d.device_name, d.ip_address, COUNT(l.id) as count
-    FROM devices d
-    LEFT JOIN dns_logs l ON d.ip_address = l.client_ip AND DATE(l.timestamp) = ?
-    WHERE d.owner != 'Charlie'
-    GROUP BY d.ip_address
-    ORDER BY count DESC
-    """
-    cursor.execute(query_device, (target_date,))
-    device_stats = cursor.fetchall()
 
-    # --- 4. 取得熱門網域 Top 10 ---
+    # --- 3. 熱門網域 Top 10 (加上百分比) ---
     query_domains = """
-    SELECT l.domain, COUNT(l.id) as count
-    FROM dns_logs l
-    JOIN devices d ON l.client_ip = d.ip_address
-    WHERE DATE(l.timestamp) = ? AND d.owner != 'Charlie'
-    GROUP BY l.domain
+    SELECT domain, COUNT(*) as count
+    FROM dns_logs
+    WHERE timestamp LIKE ?
+    GROUP BY domain
     ORDER BY count DESC
     LIMIT 10
     """
-    cursor.execute(query_domains, (target_date,))
+    cursor.execute(query_domains, (search_pattern,))
     top_domains = cursor.fetchall()
 
-    # --- 5. 組合訊息 ---
-    type_label = "手動回溯" if is_manual else "每日結算"
+    # --- 4. 組合 Telegram 訊息 ---
+    type_label = "手動回溯" if is_manual else "每日全紀錄"
     msg = f"🛡️ *DNS {type_label}通報* ({target_date})\n"
-    msg += f"━━━━━━━━━━━━━━━\n"
-    msg += f"📈 *當日總查詢量*: `{total_queries}`\n\n"
+    msg += f"━━━━━━━━━━━━\n"
+    msg += f"📈 *當前總查詢量*: `{total_queries}`\n\n"
     
-    msg += f"📱 *各設備佔比*:\n"
-    for row in device_stats:
-        pct = (row['count'] / total_queries) * 100 if total_queries > 0 else 0
-        msg += f"• {row['device_name']}: `{row['count']}` 次 ({pct:.1f}%)\n"
-    
-    msg += f"\n🌍 *熱門網域 Top 10*:\n"
-    if top_domains:
+    msg += f"🌍 *熱門存取網域 Top 10*:\n"
+    if top_domains and total_queries > 0:
         for i, row in enumerate(top_domains, 1):
-            msg += f"{i}. `{row['domain']}` ({row['count']}次)\n"
+            # 計算該網域所佔百分比
+            percentage = (row['count'] / total_queries) * 100
+            msg += f"{i}. `{row['domain']}`\n   共 `{row['count']}` 次 ({percentage:.1f}%)\n"
+    elif total_queries == 0:
+        msg += "_該時段無任何查詢紀錄_\n"
     else:
-        msg += "_今日無存取紀錄_\n"
+        msg += "_該時段無資料紀錄_\n"
         
-    msg += f"━━━━━━━━━━━━━━━\n"
+    msg += f"━━━━━━━━━━━━\n"
     msg += f"⏰ 生成時間: {datetime.now().strftime('%H:%M:%S')}"
 
-    # --- 6. 發送與顯示 ---
+    # 終端機預覽
     print(f"\n--- {type_label}分析結果 ({target_date}) ---")
-    print(msg.replace('*', '').replace('`', '')) # 終端機顯示簡潔版
+    print(msg.replace('*', '').replace('`', ''))
 
+    # --- 5. 發送報表 ---
     if config:
         send_telegram(config['telegram_token'], config['telegram_chat_id'], msg)
+    else:
+        print("⚠️ 提示：未在資料庫中找到有效的 Telegram Token，僅顯示於終端機。")
 
     conn.close()
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
-        # 手動執行模式: python3 analyzer.py 2026-03-17
         analyze_and_report(sys.argv[1])
     else:
-        # 自動模式 (不帶參數): 分析昨天
         analyze_and_report()

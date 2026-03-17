@@ -1,65 +1,107 @@
-import time
-import os
-import sqlite3
+# watcher.py
 import re
+import sqlite3
+import os
+import subprocess
+import sys
 
-# 自動抓取路徑
+# 設定路徑
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 LOG_FILE = os.path.join(BASE_DIR, "dns_query.log")
 
-# --- 核心修正：精準匹配 [INFO] IP - Domain ---
-LOG_PATTERN = re.compile(r'\[INFO\]\s+(?P<ip>[\d\.]+)(?::\d+)?\s+-\s+(?P<domain>[^\s]+)')
+def get_db_connection():
+    """建立資料庫連線"""
+    return sqlite3.connect(DB_PATH, timeout=10)
 
-def init_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    return conn, conn.cursor()
-
-def get_device_name(cursor, ip):
+def get_or_create_device(cursor, ip):
+    """自動識別並建立新設備紀錄"""
     cursor.execute("SELECT device_name FROM devices WHERE ip_address = ?", (ip,))
-    result = cursor.fetchone()
-    if result:
-        return result[0]
-    else:
-        # 自動根據 IP 末碼命名 (例如 .71 -> Device-71)
-        suffix = ip.split('.')[-1]
-        device_name = f"Device-{suffix}"
-        cursor.execute("INSERT INTO devices (ip_address, device_name) VALUES (?, ?)", (ip, device_name))
-        print(f"🆕 發現新裝置: {ip} (命名為 {device_name})")
-        return device_name
+    row = cursor.fetchone()
+    if not row:
+        last_part = ip.split('.')[-1]
+        new_name = f"Device-{last_part}"
+        cursor.execute("INSERT INTO devices (ip_address, device_name, owner) VALUES (?, ?, ?)", (ip, new_name, 'Unknown'))
+        print(f"🆕 [新設備] 偵測到 IP: {ip} -> 自動命名為: {new_name}")
+        return new_name
+    return row[0]
 
-def monitor():
-    print(f"🚀 DNS 監控修正版啟動...")
-    conn, cursor = init_db_connection()
+def process_line(line):
+    """解析每一行日誌並寫入 DB"""
+    if not line.strip():
+        return
+
+    # 打印原始日誌供偵錯 (Debug Print)
+    print(f"🔍 [收到原始日誌] {line}")
+
+    # 強化版 Regex：支援多重 [INFO] 標籤、空格以及 IPv4 格式
+    regex = r'(?:\[INFO\]\s*)+\s*(?P<ip>[\d\.]+)(?::\d+)?\s+-\s+(?P<domain>[^\s]+)'
+    match = re.search(regex, line)
+    
+    if match:
+        ip = match.group('ip')
+        domain = match.group('domain').rstrip('.')
+        
+        # 處理本機迴圈地址
+        if ip == '::1': 
+            ip = '127.0.0.1'
+
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # 確保設備存在
+            get_or_create_device(cursor, ip)
+            
+            # 寫入日誌表格 (對應新版 init_db.py 結構)
+            cursor.execute(
+                "INSERT INTO dns_logs (client_ip, domain, timestamp) VALUES (?, ?, datetime('now', 'localtime'))",
+                (ip, domain)
+            )
+            conn.commit()
+            conn.close()
+            print(f"✅ [寫入成功] 來源: {ip} | 網域: {domain}")
+            
+        except sqlite3.Error as e:
+            print(f"❌ [資料庫錯誤] {e}")
+        except Exception as e:
+            print(f"❌ [系統錯誤] {e}")
+    else:
+        print(f"⚠️  [解析跳過] 此行格式不符預期，無法匹配 Regex。")
+
+def watch_log():
+    """主監控迴圈"""
+    print(f"🚀 Watcher 監控引擎已啟動")
+    print(f"📂 正在監控檔案: {LOG_FILE}")
+    print(f"🗄️  正在寫入資料庫: {DB_PATH}")
+    print(f"💡 (提示: 啟動時會先讀取最後 10 筆舊紀錄進行測試)\n")
+
+    # 使用 tail -n 10 -F 確保啟動時有反饋，並處理檔案輪替
+    cmd = ['tail', '-n', '10', '-F', LOG_FILE]
+    
     try:
-        with open(LOG_FILE, "r") as file:
-            file.seek(0, 2) # 跳到末尾只讀新 Log
-            while True:
-                line = file.readline()
-                if not line:
-                    time.sleep(0.5)
-                    continue
-                match = LOG_PATTERN.search(line)
-                if match:
-                    ip = match.group("ip")
-                    domain = match.group("domain").strip().rstrip('.')
-                    # 過濾系統雜訊
-                    if any(x in domain for x in [":53", "CoreDNS", "Reloading"]): continue
-                    
-                    device_name = get_device_name(cursor, ip)
-                    try:
-                        cursor.execute(
-                            "INSERT INTO dns_logs (device_name, client_ip, domain, timestamp) VALUES (?, ?, ?, datetime('now', 'localtime'))",
-                            (device_name, ip, domain)
-                        )
-                        conn.commit()
-                        print(f"✅ 成功寫入: {device_name} ({ip}) -> {domain}")
-                    except sqlite3.Error as e:
-                        print(f"❌ DB 寫入失敗: {e}")
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        
+        # 持續讀取輸出
+        for line in process.stdout:
+            process_line(line.strip())
+            
+    except FileNotFoundError:
+        print(f"❌ [錯誤] 找不到系統指令 'tail'，請檢查系統路徑。")
+    except KeyboardInterrupt:
+        print("\n🛑 [停止] 監控服務已手動關閉。")
+        process.terminate()
     except Exception as e:
-        print(f"💥 錯誤: {e}")
-    finally:
-        conn.close()
+        print(f"❌ [執行時異常] {e}")
 
 if __name__ == "__main__":
-    monitor()
+    # 檢查必要檔案是否存在
+    if not os.path.exists(LOG_FILE):
+        print(f"⚠️  日誌檔不存在，正在建立空檔案: {LOG_FILE}")
+        with open(LOG_FILE, 'w') as f: pass
+        
+    if not os.path.exists(DB_PATH):
+        print(f"❌ [致命錯誤] 找不到資料庫 {DB_PATH}，請先執行 init_db.py")
+        sys.exit(1)
+
+    watch_log()

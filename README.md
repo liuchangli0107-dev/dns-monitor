@@ -47,6 +47,21 @@ sudo launchctl load -w /Library/LaunchDaemons/com.charlie.dns-watcher.plist
 
 ```
 
+
+### 檢查 CoreDNS 狀態
+
+```bash
+sudo launchctl list | grep coredns
+
+```
+
+### 檢查 Watcher 狀態
+
+```bash
+sudo launchctl list | grep dns-watcher
+
+```
+
 ## 📅 自動化排程 (Crontab)
 
 ### 每日報表推送
