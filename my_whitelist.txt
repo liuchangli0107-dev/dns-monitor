@@ -1,1 +1,13 @@
-api.telegram.org apple.com icloud.com aaplimg.com googleapis.com gstatic.com canva.com fhjh.tp.edu.tw
+api.telegram.org
+apple.com
+icloud.com
+aaplimg.com
+googleapis.com
+gstatic.com
+canva.com
+fhjh.tp.edu.tw
+mzstatic.com
+itunes.apple.com
+swscan.apple.com
+swquery.apple.com
+swdownload.apple.com
