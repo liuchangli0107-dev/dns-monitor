@@ -7,7 +7,7 @@
 * **DNS Server**: 由 CoreDNS 擔任，負責解析請求並將紀錄輸出至 `dns_query.log`。
 * **Watcher (`watcher.py`)**: 背景守護進程，負責即時解析日誌並同步至 SQLite 資料庫。
 * **Analyzer (`analyzer.py`)**: 數據統計引擎，每日定時發送「佔比分析」報表至 Telegram。
-* **Database**: SQLite (`dns_monitor.db`) 存儲設備清單、查詢紀錄與 API 金鑰。
+* **Database**: SQLite 存儲設備清單、查詢紀錄與 API 金鑰。
 
 ## 🛠️ 安裝與初始化
 
@@ -23,6 +23,8 @@ sudo codesign --force --deep --sign - /usr/local/bin/coredns
 執行以下指令建立所需的資料表：
 
 ```bash
+sudo chown -R $(whoami) .
+python3 -m pip install requests
 python3 init_db.py
 
 ```
@@ -41,36 +43,74 @@ python3 init_db.py
 ### 啟動與重新載入
 
 ```bash
+# 複製檔案
+sudo cp com.charlie.coredns.plist /Library/LaunchDaemons/com.charlie.coredns.plist
+sudo cp com.charlie.dns-watcher.plist /Library/LaunchDaemons/com.charlie.dns-watcher.plist
+# 修正擁有者為 root
+sudo chown root:wheel /Library/LaunchDaemons/com.charlie.coredns.plist
+sudo chown root:wheel /Library/LaunchDaemons/com.charlie.dns-watcher.plist
+# 修正權限為 644
+sudo chmod 644 /Library/LaunchDaemons/com.charlie.coredns.plist
+sudo chmod 644 /Library/LaunchDaemons/com.charlie.dns-watcher.plist
 # 載入並啟動服務
 sudo launchctl load -w /Library/LaunchDaemons/com.charlie.coredns.plist
 sudo launchctl load -w /Library/LaunchDaemons/com.charlie.dns-watcher.plist
-
-```
-
-
-### 檢查 CoreDNS 狀態
-
-```bash
+# 檢查 CoreDNS 狀態
 sudo launchctl list | grep coredns
+# 檢查 Watcher 狀態
+sudo launchctl list | grep dns-watcher
 
 ```
 
-### 檢查 Watcher 狀態
+
+### 其他指令
 
 ```bash
-sudo launchctl list | grep dns-watcher
+# 停止背景服務
+sudo launchctl unload /Library/LaunchDaemons/com.charlie.coredns.plist
+
+# 強制殺掉可能殘留的進程
+sudo killall coredns 2>/dev/null
+
+# 重新啟動背景服務
+sudo launchctl load -w /Library/LaunchDaemons/com.charlie.coredns.plist
+
+# 重啟服務
+sudo launchctl kickstart -k system/com.charlie.coredns
 
 ```
 
 ## 📅 自動化排程 (Crontab)
 
-### 每日報表推送
+系統現在採用 **自動補發機制**。透過 `scheduler.py` 檢查資料庫狀態，確保即使電腦曾關機，開機後也會自動補發缺失日期的報表。
 
-每 30 分鐘 執行一次 自動統計「昨日」數據並發送 Telegram 通報：
+### 1. 啟用自動排程 (Scheduler)
+建議每 10 分鐘或每小時執行一次 `scheduler.py`。它會自動判斷是否需要呼叫 `analyzer.py` 生成報表。
 
 ```bash
-# 執行 crontab -e 加入以下內容
-*/30 * * * * /usr/bin/python3 /Users/YOURNAE/dns-monitor/analyzer.py >> /Users/YOURNAE/dns-monitor/analyzer.log 2>&1
+# 確認 Python 路徑
+which python3
+
+# 編輯 cron: crontab -e
+# 每 10 分鐘檢查一次執行狀態
+*/10 * * * * /usr/bin/python3 /Users/$(whoami)/dns-monitor/scheduler.py >> /path/to/dns-monitor/scheduler.log 2>&1
+
+```
+
+### 2. 檢查以下這兩個 macOS 的安全設定，這是 iMac 能否自動化跑起來的最後一關：
+這是 macOS 最常擋掉 Cron 的地方。請依照以下步驟操作：
+* 點擊左上角  -> **系統設定**。
+* 進入 **隱私權與安全性** -> **全磁碟存取權限**。
+* 點擊下方的 **「+」** 號。
+* 這時會跳出檔案視窗，請按快捷鍵 `Command + Shift + G`。
+* 輸入路徑：`/usr/sbin/cron` 並按 Enter。
+* 選中 `cron` 並確保它的**開關是開啟的**。
+* *(同樣建議把 `/usr/bin/python3` 也加進去並開啟)*
+
+
+### 3. 手動分析 2026-03-21 15 的數據並產出圖表
+```bash
+python3 analyzer.py "2026-03-21 15" --type both
 
 ```
 
@@ -80,20 +120,43 @@ sudo launchctl list | grep dns-watcher
 
 ```bash
 # 清空專案目錄下所有的日誌檔案
-truncate -s 0 /Users/YOURNAE/dns-monitor/*.log
+truncate -s 0 /Users/$(whoami)/dns-monitor/*.log
 
 ```
 
 ### 💡 維護小筆記：
 如果您希望日誌清理也自動化，可以考慮在 `crontab` 裡多加一行，例如每週一凌晨清理一次：
-`0 0 * * 1 truncate -s 0 /Users/YOURNAE/dns-monitor/*.log`
+`0 0 * * 1 truncate -s 0 /Users/$(whoami)/dns-monitor/*.log`
 
-## 📊 數據統計細節
+## 📊 數據統計與分析細節
 
-* **自動設備識別**：新設備接入時會自動建立 `Device-末碼` 紀錄。建議手動至資料庫修改 `device_name`（如改為 `Olivia_iPhone`）以優化報表易讀性。
-* **LEFT JOIN 統計**：分析腳本採用 `LEFT JOIN` 邏輯，確保當日「零活動」的設備也會出現在清單中。
+本系統不僅僅是記錄次數，更透過智慧過濾與網域歸類，提供最具閱讀價值的分析報告。
+
+### 1. 智慧網域歸類 (Domain Grouping)
+為了避免報表被瑣碎的子網域拆散，系統會自動將性質相近的請求彙整。例如：
+* **Google 教育/協作**: 整合 `classroom.google.com`、`docs.google.com`、`drive.google.com`。
+* **AI 工具**: 整合 `chatgpt.com` 與 `openai.com`。
+* **影音串流**: 將 `googlevideo.com`、`ytimg.com` 等背景請求統一併入 **YouTube 服務**。
+* **開發工具**: 整合 `github.com` 與各式 `githubassets` 資源。
+
+### 2. 雜訊過濾機制 (Noise Filtering)
+系統內建強大的白名單 `config.py`，自動剔除以下非人為操作的背景雜訊：
+* **系統通訊**: Apple/Google 設備的背景授權驗證、憑證檢查 (OCSP/CRL)。
+* **CDN 節點**: 排除 `fastly.net`、`akamai.net` 等底層加速網域。
+* **廣告與追蹤**: 自動過濾 `doubleclick.net`、`analytics.google.com` 等數據採集請求。
+
+### 3. 可視化報表 (Visualization)
+每日報表包含三種維度：
+* **文字通報**: 詳細列出 Top 20 訪問量最高的網域及次數。
+* **圓餅圖 (Pie Chart)**: 顯示前 10 名的比例分佈，並將低於 2% 的瑣碎項目自動併入「其他」，確保圖表簡潔。
+* **長條圖 (Bar Chart)**: 針對前 10 大活躍項目進行橫向對比，直觀展現使用重心。
+
+### 4. 狀態管理 (System Status)
+分析引擎會將每次「自動執行」的成功紀錄存入 SQLite 的 `system_status` 表。
+* **斷點續傳**: 若電腦關機導致漏發，下次啟動時會自動補發所有缺失日期的報告。
+* **手動隔離**: 手動執行 `analyzer.py` 預設不紀錄狀態，方便隨時進行歷史數據複查。
 
 ---
 
 **Maintainer**: Charlie Liu
-**Last Updated**: 2026-03-17
+**Last Updated**: 2026-03-18

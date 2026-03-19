@@ -2,6 +2,8 @@
 config.json
 Corefile
 *.db
+*.sh
+*.sql
 
 # --- 2. 紀錄與報告 (Logs & Reports) ---
 report/
