@@ -11,65 +11,68 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
+# 紀錄用戶狀態： {chat_id: 'WAITING_DATE'}
+user_states = {}
+
 def get_bot_config():
-    """從資料庫獲取 Token 與 授權的 Chat ID 清單"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    # 這裡只抓取 devices 表中有紀錄的 chat_id
     cur.execute("SELECT telegram_token, telegram_chat_id FROM devices WHERE telegram_token IS NOT NULL")
     rows = cur.fetchall()
     conn.close()
-    
-    if not rows:
-        return None, []
-    
-    token = rows[0][0]
-    authorized_chats = [str(row[1]) for row in rows]
-    return token, authorized_chats
+    return (rows[0][0], [str(row[1]) for row in rows]) if rows else (None, [])
+
+def send_tg_message(token, chat_id, text):
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    requests.post(url, data={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"})
 
 def handle_command(token, chat_id, text):
-    """處理指令邏輯"""
     chat_id = str(chat_id)
-    token, authorized_chats = get_bot_config()
+    _, authorized_chats = get_bot_config()
 
-    # 第二步：安全檢查 - 只反應 devices 表裡的 chat_id
     if chat_id not in authorized_chats:
-        print(f"⚠️ 拒絕未授權請求: {chat_id}")
         return
 
-    print(f"📨 收到來自 {chat_id} 的指令: {text}")
+    # 1. 初始指令
+    if text == "/report":
+        user_states[chat_id] = "WAITING_DATE"
+        send_tg_message(token, chat_id, "📅 *請輸入查詢日期與小時*\n\n格式範例：\n• `2026-03-21 15` (特定時報表)\n• `2026-03-21` (當日全天報表)\n\n直接輸入內容即可：")
+        return
 
-    if text.startswith("/report"):
-        # 解析日期 (例如 /report 2026-03-23)
-        parts = text.split()
-        target_date = parts[1] if len(parts) > 1 else (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    # 2. 處理後續輸入
+    if user_states.get(chat_id) == "WAITING_DATE":
+        input_data = text.strip()
         
-        # 呼叫 analyzer.py (手動查詢不帶 --record)
+        # 簡單驗證格式 (至少要有日期格式)
+        if len(input_data) < 10:
+            send_tg_message(token, chat_id, "❌ 格式似乎不正確，請重新輸入（例如：2026-03-21 15）")
+            return
+
+        send_tg_message(token, chat_id, f"🔍 正在為您生成 `{input_data}` 的數據報表...")
+        
+        # 執行您剛改好的 analyzer.py
+        # 這裡直接把輸入的字串傳進去，因為您的 analyzer.py 已支援 "YYYY-MM-DD HH"
         subprocess.run([
             sys.executable, 
             "analyzer.py", 
-            target_date, 
+            input_data, 
             "--type", "both"
         ])
+        
+        # 完成後清除狀態
+        del user_states[chat_id]
 
 def start_polling():
     token, _ = get_bot_config()
-    if not token:
-        print("❌ 找不到 Telegram Token，請檢查資料庫。")
-        return
-
-    api_url = f"https://api.telegram.org/bot{token}/"
-    last_update_id = 0
+    if not token: return
     
-    print(f"🤖 DNS Bot 監聽中 (授權模式)...")
+    last_update_id = 0
+    print(f"🤖 DNS 互動機器人已啟動 (對話模式)...")
     
     while True:
         try:
-            # 使用 Long Polling 減少伺服器負擔
-            resp = requests.get(f"{api_url}getUpdates", params={
-                "offset": last_update_id + 1, 
-                "timeout": 30
-            }, timeout=35).json()
+            api_url = f"https://api.telegram.org/bot{token}/getUpdates"
+            resp = requests.get(api_url, params={"offset": last_update_id + 1, "timeout": 30}, timeout=35).json()
 
             if "result" in resp:
                 for update in resp["result"]:
@@ -77,9 +80,7 @@ def start_polling():
                     if "message" in update and "text" in update["message"]:
                         msg = update["message"]
                         handle_command(token, msg["chat"]["id"], msg["text"])
-        
         except Exception as e:
-            print(f"📡 網路異常或超時，5秒後重試... ({e})")
             time.sleep(5)
 
 if __name__ == "__main__":
