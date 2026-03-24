@@ -83,6 +83,20 @@ WHITELIST_PATTERNS = [
     r".*\.elb\.amazonaws\.com$",  # AWS 負載平衡 (通常為背景遙測接收端)
     r".*\.cloudfront\.net$",  # Amazon CloudFront CDN (過多雜訊可濾掉)
     r".*\.digicert\.com$",  # SSL 憑證驗證
+    # --- 5. 廣告追蹤與第三方數據同步 (根據 03-24 報表新增) ---
+    r".*\.cinarra\.com$",  # dps.jp.cinarra.com
+    r".*\.rundsp\.com$",  # match.rundsp.com
+    r".*\.alexametrics\.com$",  # certify-js.alexametrics.com
+    r".*\.lkqd\.net$",  # cs.lkqd.net
+    r".*\.spotxchange\.com$",  # sync.search.spotxchange.com
+    r".*\.krxd\.net$",  # beacon.krxd.net
+    r".*\.lmgssp\.com$",  # cookie.lmgssp.com
+    r".*\.mrpdata\.net$",  # j.mrpdata.net
+    r".*\.extend\.tv$",  # sync.extend.tv
+    r".*\.oraki\.io$",  # sync.oraki.io
+    r".*\.tribalfusion\.com$",  # a.tribalfusion.com
+    r".*\.dotomi\.com$",  # beachfront-match.dotomi.com
+    r".*\.gammaplatform\.com$",  # cm-supply-web.gammaplatform.com
 ]
 
 # 預先編譯以提高效能

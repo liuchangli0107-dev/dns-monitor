@@ -93,7 +93,7 @@ which python3
 
 # 編輯 cron: crontab -e
 # 每 10 分鐘檢查一次執行狀態
-*/10 * * * * /usr/bin/python3 /Users/$(whoami)/dns-monitor/scheduler.py >> /path/to/dns-monitor/scheduler.log 2>&1
+*/10 * * * * /usr/bin/python3 /Users/$(whoami)/dns-monitor/scheduler.py >> /Users/$(whoami)/dns-monitor/scheduler.log 2>&1
 
 ```
 

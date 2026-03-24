@@ -24,8 +24,14 @@ DOMAIN_GROUPS = {
     "Gmail/帳號": ["mail.google", "accounts.google"],
     "ChatGPT/OpenAI": ["chatgpt.com", "openai.com"],
     "Canva": ["canva.com", "canva-static.com"],
-    "GitHub 服務": ["github.com", "githubassets.com", "githubusercontent.com"],
     "遠端會議": ["zoom.us", "webex.com", "microsoft.com/microsoft-teams"],
+    "GitHub 服務": [
+        "github.com",
+        "githubassets.com",
+        "githubusercontent.com",
+        "githubcopilot.com",
+    ],
+    "廣告與追蹤": ["ads", "track", "pixel", "analytics", "sync", "match"],  # 關鍵字攔截
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -145,11 +151,13 @@ if __name__ == "__main__":
         default=(datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d"),
     )
     parser.add_argument("--type", choices=["pie", "bar", "both"], default="both")
-    
+
     # 關鍵點：請確認下面這行在 parser 區塊中只出現這唯一一次
-    parser.add_argument("--record", action="store_true", help="是否紀錄至 system_status 表")
-    
+    parser.add_argument(
+        "--record", action="store_true", help="是否紀錄至 system_status 表"
+    )
+
     args = parser.parse_args()
-    
+
     # 執行分析，並把 record 參數傳進去
     analyze_and_report(args.date, args.type, record=args.record)
