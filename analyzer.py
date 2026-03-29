@@ -9,7 +9,7 @@ from config import is_whitelisted
 import pie_chart
 import bar_chart
 
-# --- 定義歸類規則 (加入 Google 網頁歸類) ---
+# --- 定義歸類規則 ---
 DOMAIN_GROUPS = {
     "Grammarly 服務": "grammarly",
     "YouTube 服務": ["youtube.com", "googlevideo.com", "ytimg.com", "youtu.be"],
@@ -31,7 +31,25 @@ DOMAIN_GROUPS = {
         "githubusercontent.com",
         "githubcopilot.com",
     ],
-    "廣告與追蹤": ["ads", "track", "pixel", "analytics", "sync", "match"],  # 關鍵字攔截
+    "🎙️ Podcast/串流": ["firstory.me"],
+    "🚫 廣告與追蹤": ["ads", "track", "pixel", "analytics", "sync", "match"],
+    "🚫 攔截雜訊": ["msedge.net", "azurefd.net"],
+    "📱 Instagram": ["instagram.com", "cdninstagram.com"],
+    "📱 Facebook": ["facebook.com", "fbcdn.net", "messenger.com"],
+    "💬 Discord 通訊": ["discord", "discordapp", "discord.gg"],
+    "🎮 Steam 平台": ["steam", "steampowered", "steamcommunity"],
+    "🎮 Roblox 遊戲": ["roblox", "rbxcdn"],
+    "🎮 Epic Games": ["epicgames", "fortnite"],
+    "🎮 三大主機平台": ["nintendo", "playstation", "xbox"],
+    "🎮 英雄聯盟": ["riotgames", "leagueoflegends", "pvp.net"],
+    "🎮 麥塊 (Minecraft)": ["minecraft", "mojang"],
+    "🎮 暴雪 (Blizzard)": [
+        "battlenet",
+        "blizzard",
+        "hearthstone",
+        "battle.net",
+        "akamaized.net",
+    ],
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
