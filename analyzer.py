@@ -3,39 +3,60 @@ import os
 import requests
 import sys
 import argparse
-from datetime import datetime, timedelta
-from config import is_whitelisted
-
 import pie_chart
 import bar_chart
+import base64
+import json
+import time
+from datetime import datetime, timedelta
+from config import is_whitelisted
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+from Crypto.Hash import SHA1
 
 # --- 定義歸類規則 ---
 DOMAIN_GROUPS = {
-    "Grammarly 服務": "grammarly",
-    "YouTube 服務": ["youtube.com", "googlevideo.com", "ytimg.com", "youtu.be"],
-    "Google 教育/協作": ["classroom.google.com", "docs.google", "drive.google"],
-    "Google 網頁與搜尋": [
-        "www.google.com",
-        "m.google.com",
-        "csp.withgoogle.com",
-        "google.com.tw",
+    # --- Cloud & Development ---
+    "CloudDevEnv": ["cloudworkstations.dev", "run.app", "googleworkstations.com"],
+    "Firebase": [
+        "firebase",
+        "app-measurement.com",
+        "firebaselogging",
+        "firebase.io",
+        "firebaseio.com",
+        "firebase.google.com",
     ],
-    "Google 系統/商店": ["play.google.com", "android.clients", "gstatic.com"],
-    "Gmail/帳號": ["mail.google", "accounts.google"],
-    "ChatGPT/OpenAI": ["chatgpt.com", "openai.com"],
-    "Canva": ["canva.com", "canva-static.com"],
-    "遠端會議": ["zoom.us", "webex.com", "microsoft.com/microsoft-teams"],
-    "GitHub 服務": [
+    "GitHub": [
         "github.com",
         "githubassets.com",
         "githubusercontent.com",
         "githubcopilot.com",
         "github-cloud.s3.amazonaws.com",
     ],
-    "🎙️ Podcast/串流": ["firstory.me"],
-    "💬 LINE 通訊": ["line-apps.com", "line.me"],
-    "💼 104": ["104.com.tw"],
-    "🚫 廣告與追蹤": [
+    "ChatGPT": ["chatgpt.com", "openai.com"],
+    # --- Google Ecosystem ---
+    "GoogleSearch": [
+        "www.google.com",
+        "m.google.com",
+        "csp.withgoogle.com",
+        "google.com.tw",
+    ],
+    "GoogleDocs": ["classroom.google.com", "docs.google", "drive.google"],
+    "GoogleSystem": ["play.google.com", "android.clients", "gstatic.com"],
+    "YouTube": ["youtube.com", "googlevideo.com", "ytimg.com", "youtu.be"],
+    "Gmail": ["mail.google", "accounts.google"],
+    # --- Social & Communication ---
+    "Line": ["line-apps.com", "line.me"],
+    "Facebook": ["facebook.com", "fbcdn.net", "messenger.com"],
+    "Instagram": ["instagram.com", "cdninstagram.com"],
+    "Discord": ["discord", "discordapp", "discord.gg"],
+    # --- Productivity & Work ---
+    "JobSearch": ["104.com.tw"],
+    "Meeting": ["zoom.us", "webex.com", "microsoft.com/microsoft-teams"],
+    "Canva": ["canva.com", "canva-static.com"],
+    "Grammarly": "grammarly",
+    # --- Security & Blocking ---
+    "AdsTracker": [
         "ads",
         "track",
         "pixel",
@@ -45,22 +66,20 @@ DOMAIN_GROUPS = {
         "inline.app",
         "scarabresearch.com",
     ],
-    "🚫 攔截雜訊": ["msedge.net", "azurefd.net"],
-    "📱 Instagram": ["instagram.com", "cdninstagram.com"],
-    "📱 Facebook": ["facebook.com", "fbcdn.net", "messenger.com"],
-    "💬 Discord 通訊": ["discord", "discordapp", "discord.gg"],
-    "🎮 Steam 平台": ["steam", "steampowered", "steamcommunity"],
-    "🎮 Roblox 遊戲": ["roblox", "rbxcdn"],
-    "🎮 Epic Games": ["epicgames", "fortnite"],
-    "🎮 三大主機平台": ["nintendo", "playstation", "xbox"],
-    "🎮 英雄聯盟": ["riotgames", "leagueoflegends", "pvp.net"],
-    "🎮 麥塊 (Minecraft)": ["minecraft", "mojang"],
-    "🎮 暴雪 (Blizzard)": [
+    "NoiseBlock": ["msedge.net", "azurefd.net"],
+    "AppleService": ["apple.com", "icloud.com", "mzstatic.com", "safebrowsing.apple"],
+    # --- Entertainment ---
+    "Podcast": ["firstory.me"],
+    "Gaming": [
+        "steam",
+        "roblox",
+        "epicgames",
+        "riotgames",
         "battlenet",
-        "blizzard",
-        "hearthstone",
-        "battle.net",
-        "akamaized.net",
+        "minecraft",
+        "nintendo",
+        "playstation",
+        "xbox",
     ],
 }
 
@@ -99,15 +118,100 @@ def send_telegram(token, chat_id, message, photo_paths=None):
     return True
 
 
-def analyze_and_report(target_time, chart_type="both", record=False):
+def push_to_cloud(dev_name, sorted_data):
+    # 1. 讀取 config.json
+    try:
+        with open("config.json", "r", encoding="utf-8") as f:
+            config_dict = json.load(f)
+    except Exception as e:
+        print(f"❌ 無法讀取 config.json: {e}")
+        return
+
+    url = config_dict.get("store_url")
+    if not url:
+        return
+
+    print(f"store_url: {url}")
+
+    # 2. 準備 RSA 公鑰
+    try:
+        with open("public.pem", "rb") as f:
+            key_content = f.read()
+        recipient_key = RSA.import_key(key_content)
+        cipher = PKCS1_OAEP.new(key=recipient_key, hashAlgo=SHA1)
+    except Exception as e:
+        print(f"❌ 公鑰讀取失敗: {e}")
+        return
+
+    print(f"🚀 開始單筆同步 {dev_name} 數據...")
+    headers = {"Content-Type": "application/json"}
+
+    # 3. 循環傳送 Top 15
+    for i, row in enumerate(sorted_data[:15], 1):
+        # 封裝為單筆陣列，保持與後端 PHP foreach 兼容
+        single_payload = [
+            {
+                "domain": row["domain"],
+                "count": row["count"],
+                "status": "online",
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        ]
+
+        # 轉為緊湊 JSON
+        json_str = json.dumps(single_payload, separators=(",", ":"))
+
+        try:
+            # 加密
+            encrypted = cipher.encrypt(json_str.encode("utf-8"))
+            # 修正處：b64encode (移除底線)
+            base64_data = base64.b64encode(encrypted).decode("utf-8")
+
+            # 構建傳送封包
+            payload = {"device_id": dev_name, "data": base64_data}
+
+            resp = requests.post(url, json=payload, headers=headers, timeout=10)
+
+            if resp.status_code == 200:
+                print(f"  ✅ [{i}/15] {row['domain']} 同步成功")
+            else:
+                print(f"  ⚠️ [{i}/15] 同步異常: {resp.status_code}")
+
+            # 輕微延遲確保雲端寫入穩定
+            time.sleep(0.05)
+
+        except Exception as e:
+            print(f"  ❌ [{i}/15] 加密失敗: {e}")
+
+    print("🏁 雲端同步完成。")
+
+
+def analyze_and_report(
+    target_date, chart_type="both", record=False, start_t=None, end_t=None
+):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
+    # --- 關鍵修改：支援精確時段查詢 ---
+    if start_t and end_t:
+        start_str = f"{target_date} {start_t}:00"
+        end_str = f"{target_date} {end_t}:59"
+        query = "SELECT domain, COUNT(*) as count FROM dns_logs WHERE timestamp BETWEEN ? AND ? GROUP BY domain"
+        cursor.execute(query, (start_str, end_str))
+        target_display = f"{target_date} {start_t}~{end_t}"
+    else:
+        # 原有的全天模式
+        cursor.execute(
+            "SELECT domain, COUNT(*) as count FROM dns_logs WHERE timestamp LIKE ? GROUP BY domain",
+            (f"{target_date}%",),
+        )
+        target_display = target_date
+
     # 1. 查詢資料
     cursor.execute(
         "SELECT domain, COUNT(*) as count FROM dns_logs WHERE timestamp LIKE ? GROUP BY domain",
-        (f"{target_time}%",),
+        (f"{target_display}%",),
     )
     all_rows = cursor.fetchall()
 
@@ -145,14 +249,14 @@ def analyze_and_report(target_time, chart_type="both", record=False):
     )
     photos = []
     if chart_type in ["pie", "both"]:
-        photos.append(pie_chart.generate_pie(sorted_data, target_time, dev_name))
+        photos.append(pie_chart.generate_pie(sorted_data, target_display, dev_name))
     if chart_type in ["bar", "both"]:
         photos.append(
-            bar_chart.generate_dns_bar(sorted_data[:10], target_time, dev_name)
+            bar_chart.generate_dns_bar(sorted_data[:10], target_display, dev_name)
         )
 
     # 4. 組合報表
-    msg = f"🛡️ *{dev_name} Top 20 通報* ({target_time}):\n"
+    msg = f"🛡️ *{dev_name} Top 20 通報* ({target_display}):\n"
     for i, row in enumerate(sorted_data[:20], 1):
         msg += f"{i}. `{row['domain']}` ({row['count']}次)\n"
     msg += f"━━━━━━━━━━━━\n⏰ 執行: {datetime.now().strftime('%H:%M:%S')}"
@@ -166,8 +270,10 @@ def analyze_and_report(target_time, chart_type="both", record=False):
             [p for p in photos if p],
         )
         if success and record:
-            update_system_status(target_time)
-            print(f"✅ {target_time} 已紀錄至 system_status")
+            update_system_status(target_display)
+            print(f"✅ {target_display} 已紀錄至 system_status")
+
+        push_to_cloud(dev_name, sorted_data)
 
     print(msg)
     conn.close()

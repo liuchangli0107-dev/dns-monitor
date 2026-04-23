@@ -4,6 +4,7 @@ Corefile
 *.db
 *.sh
 *.sql
+*.pem
 
 # --- 2. 紀錄與報告 (Logs & Reports) ---
 report/

@@ -11,7 +11,6 @@ DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
 
 def init_scheduler_db():
-    """初始化 system_status 表"""
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         """
@@ -39,7 +38,6 @@ def get_last_processed_date():
 
 
 def has_logs(date_str):
-    """檢查當天是否有日誌資料，避免空跑"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(
@@ -47,7 +45,7 @@ def has_logs(date_str):
     )
     count = cur.fetchone()[0]
     conn.close()
-    return count > 50  # 超過 50 筆才視為有效日誌
+    return count > 0
 
 
 # --- 執行流程 ---
