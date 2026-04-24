@@ -54,32 +54,6 @@ DOMAIN_GROUPS = {
         "github-cloud.s3.amazonaws.com",
     ],
     "ChatGPT": ["chatgpt.com", "openai.com"],
-    # --- Google Ecosystem ---
-    "GoogleSearch": [
-        "www.google.com",
-        "m.google.com",
-        "csp.withgoogle.com",
-        "google.com.tw",
-    ],
-    "GoogleDocs": ["classroom.google.com", "docs.google", "drive.google"],
-    "GoogleSystem": [
-        "play.google.com",
-        "android.clients",
-        "gstatic.com",
-        "safebrowsing.google.com",
-        "mtalk.google.com",
-        "this-url-does-not-exist",
-        ".invalid",
-        "google.com",
-    ],
-    "Gmail": ["mail.google", "accounts.google"],
-    "YouTube": [
-        "youtube.com",
-        "googlevideo.com",
-        "ytimg.com",
-        "youtu.be",
-        "youtube-nocookie.com",
-    ],
     # --- Social & Communication ---
     "Line": ["line-apps.com", "line.me"],
     "Facebook": ["facebook.com", "fbcdn.net", "messenger.com"],
@@ -115,6 +89,38 @@ DOMAIN_GROUPS = {
         "nintendo",
         "playstation",
         "xbox",
+    ],
+    "Spotify": [
+        "spotify.com", 
+        "spotify.net", 
+        "spotify.dev",
+        "googleusercontent.com/spotify.com" # 針對您這次看到的特殊格式
+    ],
+    # --- Google Ecosystem ---
+    "YouTube": [
+        "youtube.com",
+        "googlevideo.com",
+        "ytimg.com",
+        "youtu.be",
+        "youtube-nocookie.com",
+    ],
+    "GoogleSearch": [
+        "www.google.com",
+        "m.google.com",
+        "csp.withgoogle.com",
+        "google.com.tw",
+    ],
+    "GoogleDocs": ["classroom.google.com", "docs.google", "drive.google"],
+    "Gmail": ["mail.google", "accounts.google"],
+    "GoogleSystem": [
+        "play.google.com",
+        "android.clients",
+        "gstatic.com",
+        "safebrowsing.google.com",
+        "mtalk.google.com",
+        "this-url-does-not-exist",
+        ".invalid",
+        "google.com",
     ],
 }
 
