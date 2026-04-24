@@ -68,6 +68,8 @@ DOMAIN_GROUPS = {
         "gstatic.com",
         "safebrowsing.google.com",
         "mtalk.google.com",
+        "this-url-does-not-exist",
+        ".invalid",
         "google.com",
     ],
     "Gmail": ["mail.google", "accounts.google"],
