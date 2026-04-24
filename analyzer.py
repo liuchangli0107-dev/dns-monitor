@@ -1,23 +1,41 @@
-import sqlite3
-import os
-import requests
-import sys
+# 1. 標準庫 (Standard Library)
 import argparse
-import pie_chart
-import bar_chart
 import base64
 import json
+import os
+import site
+import sqlite3
+import sys
 import time
 from datetime import datetime, timedelta
-from config import is_whitelisted
-from Crypto.PublicKey import RSA
+
+# 2. 第三方庫 (Third-party Libraries)
+import requests
 from Crypto.Cipher import PKCS1_OAEP
 from Crypto.Hash import SHA1
+from Crypto.PublicKey import RSA
+
+# 3. 本地模組 (Local Modules)
+import bar_chart
+import pie_chart
+from config import is_whitelisted
+
+# 強制加入用戶套件路徑，確保 subprocess 找得到 Crypto
+user_site = site.getusersitepackages()
+if user_site not in sys.path:
+    sys.path.append(user_site)
 
 # --- 定義歸類規則 ---
 DOMAIN_GROUPS = {
     # --- Cloud & Development ---
-    "CloudDevEnv": ["cloudworkstations.dev", "run.app", "googleworkstations.com"],
+    "CloudDevEnv": [
+        "cloudworkstations.dev",
+        "run.app",
+        "googleworkstations.com",
+        "console.cloud.google.com",
+        "cloud.google.com",
+        "gemini.google.com",
+    ],
     "Firebase": [
         "firebase",
         "app-measurement.com",
@@ -25,6 +43,8 @@ DOMAIN_GROUPS = {
         "firebase.io",
         "firebaseio.com",
         "firebase.google.com",
+        "web.app",
+        "firebaseapp.com",
     ],
     "GitHub": [
         "github.com",
@@ -42,9 +62,22 @@ DOMAIN_GROUPS = {
         "google.com.tw",
     ],
     "GoogleDocs": ["classroom.google.com", "docs.google", "drive.google"],
-    "GoogleSystem": ["play.google.com", "android.clients", "gstatic.com"],
-    "YouTube": ["youtube.com", "googlevideo.com", "ytimg.com", "youtu.be"],
+    "GoogleSystem": [
+        "play.google.com",
+        "android.clients",
+        "gstatic.com",
+        "safebrowsing.google.com",
+        "mtalk.google.com",
+        "google.com",
+    ],
     "Gmail": ["mail.google", "accounts.google"],
+    "YouTube": [
+        "youtube.com",
+        "googlevideo.com",
+        "ytimg.com",
+        "youtu.be",
+        "youtube-nocookie.com",
+    ],
     # --- Social & Communication ---
     "Line": ["line-apps.com", "line.me"],
     "Facebook": ["facebook.com", "fbcdn.net", "messenger.com"],
@@ -146,42 +179,60 @@ def push_to_cloud(dev_name, sorted_data):
     print(f"🚀 開始單筆同步 {dev_name} 數據...")
     headers = {"Content-Type": "application/json"}
 
-    # 3. 循環傳送 Top 15
-    for i, row in enumerate(sorted_data[:15], 1):
-        # 封裝為單筆陣列，保持與後端 PHP foreach 兼容
-        single_payload = [
-            {
+    # 定義 RSA 2048-bit PKCS1_OAEP 的安全長度天花板
+    RSA_MAX_LENGTH = 214 
+
+    # 3. 循環處理 Top 20
+    i = 0
+    while i < 20:
+        # 嘗試抓取兩筆資料
+        chunk = sorted_data[i : i + 2]
+        if not chunk:
+            break
+            
+        # 準備當前的 Payload (先嘗試兩筆)
+        batch_payload = []
+        for row in chunk:
+            batch_payload.append({
                 "domain": row["domain"],
                 "count": row["count"],
                 "status": "online",
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        ]
+            })
+        
+        # 轉為緊湊 JSON 並檢查長度
+        json_str = json.dumps(batch_payload, separators=(",", ":"))
+        
+        # --- 自動調節邏輯 ---
+        current_batch_size = len(chunk)
+        if len(json_str) > RSA_MAX_LENGTH and current_batch_size > 1:
+            # 如果兩筆太長，就退回只抓一筆
+            print(f"⚠️ 長度為 {len(json_str)} 超標，自動切換為單筆模式...")
+            chunk = [chunk[0]] # 只取第一筆
+            batch_payload = [batch_payload[0]]
+            json_str = json.dumps(batch_payload, separators=(",", ":"))
+            current_batch_size = 1
 
-        # 轉為緊湊 JSON
-        json_str = json.dumps(single_payload, separators=(",", ":"))
-
+        # --- 執行傳送 ---
+        end_idx = i + current_batch_size
         try:
-            # 加密
             encrypted = cipher.encrypt(json_str.encode("utf-8"))
-            # 修正處：b64encode (移除底線)
             base64_data = base64.b64encode(encrypted).decode("utf-8")
-
-            # 構建傳送封包
             payload = {"device_id": dev_name, "data": base64_data}
 
             resp = requests.post(url, json=payload, headers=headers, timeout=10)
 
             if resp.status_code == 200:
-                print(f"  ✅ [{i}/15] {row['domain']} 同步成功")
+                print(f"  ✅ [{i+1}~{min(end_idx, 20)}/20] 同步成功 (長度: {len(json_str)})")
             else:
-                print(f"  ⚠️ [{i}/15] 同步異常: {resp.status_code}")
+                print(f"  ⚠️ [{i+1}~{min(end_idx, 20)}/20] 同步異常: {resp.status_code}")
 
-            # 輕微延遲確保雲端寫入穩定
-            time.sleep(0.05)
-
+            time.sleep(0.1)
         except Exception as e:
-            print(f"  ❌ [{i}/15] 加密失敗: {e}")
+            print(f"  ❌ [{i+1}/20] 嚴重錯誤: {e} | 長度: {len(json_str)}")
+
+        # 根據實際傳送的筆數增加索引 (可能是 +1 或 +2)
+        i += current_batch_size
 
     print("🏁 雲端同步完成。")
 

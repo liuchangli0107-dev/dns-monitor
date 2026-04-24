@@ -1,6 +1,6 @@
+import os
 import sqlite3
 import subprocess
-import os
 import sys
 from datetime import datetime, timedelta
 
@@ -8,6 +8,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
+
+# 取得目前用戶的 Python 套件路徑 (這就是 pycryptodome 躲藏的地方)
+user_site_packages = "/Users/nangei/Library/Python/3.9/lib/python/site-packages"
+
+# 建立一個包含該路徑的環境變數副本
+env = os.environ.copy()
+env["PYTHONPATH"] = user_site_packages + ":" + env.get("PYTHONPATH", "")
 
 
 def init_scheduler_db():
@@ -58,8 +65,10 @@ current_check = last_date + timedelta(days=1)
 
 while current_check <= yesterday:
     target_date = current_check.strftime("%Y-%m-%d")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if has_logs(target_date):
-        print(f"🕵️ 發現缺失日期 {target_date}，啟動補發...")
+        print(f"🕵️ {now_str} 發現缺失日期 {target_date}，啟動補發...")
+
         # 調用 analyzer 並帶上 --record 確保紀錄狀態
         subprocess.run(
             [
@@ -69,10 +78,11 @@ while current_check <= yesterday:
                 "--type",
                 "both",
                 "--record",
-            ]
+            ],
+            env=env  # 👈 關鍵：把 PYTHONPATH 塞進去！
         )
     else:
-        print(f"⏭️ {target_date} 無足夠日誌，跳過紀錄。")
+        print(f"⏭️ {now_str} 無足夠日誌 {target_date} ，跳過紀錄。")
         # 即使沒資料也紀錄，避免下次重複檢查
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
