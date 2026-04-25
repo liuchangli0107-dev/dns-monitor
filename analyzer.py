@@ -20,11 +20,6 @@ import bar_chart
 import pie_chart
 from config import is_whitelisted
 
-# 強制加入用戶套件路徑，確保 subprocess 找得到 Crypto
-user_site = site.getusersitepackages()
-if user_site not in sys.path:
-    sys.path.append(user_site)
-
 # --- 定義歸類規則 ---
 DOMAIN_GROUPS = {
     # --- Cloud & Development ---

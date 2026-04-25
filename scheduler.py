@@ -11,13 +11,6 @@ os.chdir(BASE_DIR)
 
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
-# 取得目前用戶的 Python 套件路徑 (這就是 pycryptodome 躲藏的地方)
-user_site_packages = "/Users/nangei/Library/Python/3.9/lib/python/site-packages"
-
-# 建立一個包含該路徑的環境變數副本
-env = os.environ.copy()
-env["PYTHONPATH"] = user_site_packages + ":" + env.get("PYTHONPATH", "")
-
 
 def init_scheduler_db():
     conn = sqlite3.connect(DB_PATH)
@@ -118,8 +111,7 @@ def manage_smart_schedule():
                         "--period",
                         p_name,
                         "--record",
-                    ],
-                    env=env,
+                    ]
                 )
 
                 if result.returncode == 0:
