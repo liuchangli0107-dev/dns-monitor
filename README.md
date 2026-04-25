@@ -8,6 +8,7 @@
 * **Watcher (`watcher.py`)**: 背景守護進程，負責即時解析日誌並同步至 SQLite 資料庫。
 * **Analyzer (`analyzer.py`)**: 數據統計引擎，每日定時發送「佔比分析」報表至 Telegram。
 * **Database**: SQLite 存儲設備清單、查詢紀錄與 API 金鑰。
+* **Cloud Sync**: 支援將分析結果推送到 Google Cloud Run 後端，供 React 面板顯示。
 
 ## 🛠️ 安裝與初始化
 
@@ -30,6 +31,14 @@ python3 init_db.py
 ```
 
 *註：請至 `devices` 資料表填入您的 Telegram `token` 與 `chat_id`。*
+
+
+### 3. 資料庫升級 (重要)
+2026-04-25 新增了課表追蹤功能，若您在其他電腦同步代碼，請務必執行升級腳本以建立 `schedule_status` 表：
+```bash
+python3 upgrade_db_v2.py
+
+```
 
 ## ⚙️ 服務管理 (Launchd)
 
@@ -156,7 +165,18 @@ truncate -s 0 /Users/$(whoami)/dns-monitor/*.log
 * **斷點續傳**: 若電腦關機導致漏發，下次啟動時會自動補發所有缺失日期的報告。
 * **手動隔離**: 手動執行 `analyzer.py` 預設不紀錄狀態，方便隨時進行歷史數據複查。
 
+## 📊 新增功能：課表自動監控 (2026-04-25)
+系統現在會根據 config.json 內的時段設定（例如：第一節、數理資優），在時段結束後自動執行以下動作：
+
+自動分析: 統計該時段內的 DNS 請求。
+
+圖表發送: 發送該時段的圓餅圖與長條圖至 Telegram。
+
+狀態回寫: 在 schedule_status 紀錄 status = 1，確保不重複發送。
+
+雲端同步: 呼叫 push_to_cloud 將數據推送至 Cloud Run。
+
 ---
 
 **Maintainer**: Charlie Liu
-**Last Updated**: 2026-03-18
+**Last Updated**: 2026-04-25
