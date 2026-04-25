@@ -3,7 +3,7 @@ import os
 import sqlite3
 import subprocess
 import sys
-from analyzer import get_current_period  # 引用我們寫好的判斷函數
+from analyzer import save_schedule_status, get_device_config
 from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,13 +16,13 @@ def init_scheduler_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS system_status (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_name TEXT,
-            last_run_date TEXT UNIQUE,
-            executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """
+            CREATE TABLE IF NOT EXISTS system_status (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_name TEXT,
+                last_run_date TEXT UNIQUE,
+                executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """
     )
     conn.commit()
     conn.close()
@@ -50,52 +50,59 @@ def has_logs(date_str):
     return count > 0
 
 
-# 檢查該時段今天是否已經成功發送過 (status>=1)
-def is_already_sent(device_name, period_name, date_str):
+def is_already_sent(device_name, period_name, date_str, start_t, end_t):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    # 這裡對應您在 upgrade_db_v2.py 建立的 schedule_status 表
     cur.execute(
-        """
-        SELECT status FROM schedule_status 
-        WHERE device_name = ? AND period_name = ? AND date = ?
-    """,
+        "SELECT status, updated_at FROM schedule_status WHERE device_name = ? AND period_name = ? AND date = ?",
         (device_name, period_name, date_str),
     )
     row = cur.fetchone()
     conn.close()
-    return row is not None and row[0] >= 1
+
+    if row is not None:
+        status, updated_at = row[0], row[1]
+
+        if status >= 1:
+            print(f"✅ 狀態為 {status}，已發送過或無數據，跳過...")
+            return True  # 只要是 1 (成功) 或 2 (無數據)，絕對跳過！
+
+        # 如果是 0，代表之前嘗試過但沒成功
+        # 我們將超時時間拉長到 20 分鐘 (1200秒)，避開 10 分鐘一次的排程衝突
+        last_time = datetime.strptime(updated_at, "%Y-%m-%d %H:%M:%S")
+        if (datetime.now() - last_time).total_seconds() > 1200:
+            print(f"⚠️ 狀態為 0 且已過 20 分鐘，判定為真崩潰，重啟任務...")
+            # 重新掛號 (更新 updated_at)
+            save_schedule_status(device_name, period_name, date_str, 0, start_t, end_t)
+            return False
+
+        # 狀態為 0 但還沒超過 20 分鐘，讓它慢慢跑，不要干擾
+        return True
+    else:
+        # 完全沒紀錄，初次掛號
+        save_schedule_status(device_name, period_name, date_str, 0, start_t, end_t)
+        return False
 
 
 def manage_smart_schedule():
-    with open("config.json", "r", encoding="utf-8") as f:
-        config_data = json.load(f)
 
     day_now = datetime.now().strftime("%A")
     time_now = datetime.now().strftime("%H:%M")
     today_str = datetime.now().strftime("%Y-%m-%d")
-    dev_name = config_data.get("device_name", "Olivia-Macbook")
 
+    config = get_device_config()
+    dev_name = config["device_name"]
+
+    with open("config.json", "r", encoding="utf-8") as f:
+        config_data = json.load(f)
     today_schedule = config_data.get("weekly_schedule", {}).get(day_now, {})
 
     for p_name, (start_t, end_t) in today_schedule.items():
         # 核心判定：現在時間是否已經過「課程結束時間」
         if time_now > end_t:
 
-            # 先確保 schedule_status 表中有這筆記錄 (如果沒有就插入，狀態預設為 0)
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO schedule_status (device_name, period_name, date, start_at, end_at, status)
-                VALUES (?, ?, ?, ?, ?, 0)
-            """,
-                (dev_name, p_name, today_str, start_t, end_t),
-            )
-            conn.commit()
-            conn.close()
-
-            # 檢查資料庫：是否已發送過 (status=1)
-            if not is_already_sent(dev_name, p_name, today_str):
+            # 檢查資料庫：是否已發送過
+            if not is_already_sent(dev_name, p_name, today_str, start_t, end_t):
                 print(f"🕵️ 偵測到已結束課程: {p_name} ({end_t}) 尚未發報，準備補發...")
 
                 # 調用 analyzer 進行完整統計
@@ -143,8 +150,7 @@ while current_check <= yesterday:
                 "--type",
                 "both",
                 "--record",
-            ],
-            env=env,  # 👈 關鍵：把 PYTHONPATH 塞進去！
+            ]
         )
     else:
         print(f"⏭️ {now_str} 無足夠日誌 {target_date} ，跳過紀錄。")

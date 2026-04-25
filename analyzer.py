@@ -256,6 +256,45 @@ def push_to_cloud(dev_name, sorted_data):
     return True
 
 
+def save_schedule_status(dev_name, period_name, target_date, status, start, end):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR REPLACE INTO schedule_status (device_name, period_name, date, status, start_at, end_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+        (dev_name, period_name, target_date, status, start, end),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_device_config():
+    conn = sqlite3.connect(DB_PATH)
+    # 這裡將 row_factory 設為 sqlite3.Row，這樣可以用 config["device_name"] 存取
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # 根據本機 IP (127.0.0.1) 抓取在資料庫中預設好的名稱與金鑰
+    cursor.execute(
+        "SELECT telegram_token, telegram_chat_id, device_name FROM devices WHERE ip_address = '127.0.0.1'"
+    )
+    config = cursor.fetchone()
+    conn.close()
+    
+    if config:
+        return {
+            "token": config["telegram_token"],
+            "chat_id": config["telegram_chat_id"],
+            "device_name": config["device_name"]
+        }
+    else:
+        # 如果找不到，才去抓 config.json 當備援，或給予預設值
+        with open("config.json", "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+        return {
+            "token": config_data.get("telegram_token", ""),
+            "chat_id": config_data.get("telegram_chat_id", ""),
+            "device_name": config_data.get("device_name", "Unknown")
+        }
+
 def analyze_and_report(
     target_date,
     chart_type="both",
@@ -267,12 +306,9 @@ def analyze_and_report(
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
+
     # 預設裝置名稱為 Unknown，如果 devices 表中有對應的 IP 就使用資料庫中的名稱
-    cursor.execute(
-        "SELECT telegram_token, telegram_chat_id, device_name FROM devices WHERE ip_address = '127.0.0.1'"
-    )
-    config = cursor.fetchone()
+    config = get_device_config()
     dev_name = config["device_name"] if config else "Unknown"
 
     if start_t and end_t:
@@ -282,9 +318,6 @@ def analyze_and_report(
         query = "SELECT domain, COUNT(*) as count FROM dns_logs WHERE timestamp BETWEEN ? AND ? GROUP BY domain"
         cursor.execute(query, (start_str, end_str))
         target_display = f"{target_date} {start_t}~{end_t}"
-        print(
-            f"SELECT domain, COUNT(*) as count FROM dns_logs WHERE timestamp BETWEEN '{start_str}' AND '{end_str}' GROUP BY domain;"
-        )
     else:
         # 原有的全天模式
         cursor.execute(
@@ -322,22 +355,14 @@ def analyze_and_report(
         key=lambda x: x["count"],
         reverse=True,
     )
-
+    
     if not sorted_data:
-        print(f"📭 {target_date} {period_name} 時段無日誌數據。")
         if record and period_name:
-            conn = sqlite3.connect(DB_PATH)
             # 標記為 2 (執行完成但無數據)
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO schedule_status (
-                    device_name, period_name, date, status, start_at, end_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-                (dev_name, period_name, target_date, 2, args.start, args.end),
-            )
-            conn.commit()
-            conn.close()
+            save_schedule_status(dev_name, period_name, target_date, 2, args.start, args.end)
+            print(f"📭 {target_date} {period_name} 時段無日誌數據。")
+        else:
+            print(f"📭 {target_date} 無日誌數據。")
         return  # 結束執行
 
     # 產生圖表
@@ -345,12 +370,10 @@ def analyze_and_report(
     if chart_type in ["pie", "both"]:
         photos.append(pie_chart.generate_pie(sorted_data, target_display, dev_name))
     if chart_type in ["bar", "both"]:
-        photos.append(
-            bar_chart.generate_dns_bar(sorted_data[:10], target_display, dev_name)
-        )
+        photos.append(bar_chart.generate_dns_bar(sorted_data, target_display, dev_name))
 
     # 組合報表
-    msg = f"🛡️ *{dev_name} Top 20 通報* ({target_display}):\n"
+    msg = f"🛡️ *{dev_name} {period_name} Top 20 通報* ({target_date}):\n"
     for i, row in enumerate(sorted_data[:20], 1):
         msg += f"{i}. `{row['domain']}` ({row['count']}次)\n"
     msg += f"━━━━━━━━━━━━\n⏰ 執行: {datetime.now().strftime('%H:%M:%S')}"
@@ -367,18 +390,8 @@ def analyze_and_report(
         if success and record:
             # 如果帶有 period_name，更新 schedule_status (課表模式)
             if period_name:
-                conn = sqlite3.connect(DB_PATH)
-                # 使用 REPLACE 確保「沒紀錄就新增，有紀錄就更新」
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO schedule_status (
-                        device_name, period_name, date, status, start_at, end_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                    (dev_name, period_name, target_date, 1, args.start, args.end),
-                )
-                conn.commit()
-                conn.close()
+                # 標記為 1 (已成功發送)
+                save_schedule_status(dev_name, period_name, target_date, 1, args.start, args.end)
                 print(f"✅ {period_name} 狀態已確保更新為 1")
             else:
                 # 否則更新 system_status (每日補發模式)
