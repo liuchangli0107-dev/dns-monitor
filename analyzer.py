@@ -268,14 +268,13 @@ def analyze_and_report(
                 save_schedule_status(
                     dev_name, period_name, target_date, 1, args.start, args.end
                 )
-                report_type = "schedule_event"
                 print(f"✅ {period_name} 狀態已確保更新為 1")
             else:
                 # 否則更新 system_status (每日補發模式)
-                report_type = "daily_summary"
                 update_system_status(target_display)
 
         # 同步至雲端
+        report_type = "schedule_event" if period_name else "daily_summary"
         success = push_to_cloud(dev_name, sorted_data, report_type, target_date)
         if success:
             print(f"✅ {target_display} 已成功同步至雲端")
