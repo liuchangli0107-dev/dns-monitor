@@ -18,108 +18,10 @@ from Crypto.PublicKey import RSA
 # 3. 本地模組 (Local Modules)
 import bar_chart
 import pie_chart
-from config import is_whitelisted
-
-# --- 定義歸類規則 ---
-DOMAIN_GROUPS = {
-    # --- Cloud & Development ---
-    "CloudDevEnv": [
-        "cloudworkstations.dev",
-        "run.app",
-        "googleworkstations.com",
-        "console.cloud.google.com",
-        "cloud.google.com",
-        "gemini.google.com",
-    ],
-    "Firebase": [
-        "firebase",
-        "app-measurement.com",
-        "firebaselogging",
-        "firebase.io",
-        "firebaseio.com",
-        "firebase.google.com",
-        "web.app",
-        "firebaseapp.com",
-    ],
-    "GitHub": [
-        "github.com",
-        "githubassets.com",
-        "githubusercontent.com",
-        "githubcopilot.com",
-        "github-cloud.s3.amazonaws.com",
-    ],
-    "ChatGPT": ["chatgpt.com", "openai.com"],
-    # --- Social & Communication ---
-    "Line": ["line-apps.com", "line.me"],
-    "Facebook": ["facebook.com", "fbcdn.net", "messenger.com"],
-    "Instagram": ["instagram.com", "cdninstagram.com"],
-    "Discord": ["discord", "discordapp", "discord.gg"],
-    # --- Productivity & Work ---
-    "JobSearch": ["104.com.tw"],
-    "Meeting": ["zoom.us", "webex.com", "microsoft.com/microsoft-teams"],
-    "Canva": ["canva.com", "canva-static.com"],
-    "Grammarly": "grammarly",
-    # --- Security & Blocking ---
-    "AdsTracker": [
-        "ads",
-        "track",
-        "pixel",
-        "analytics",
-        "sync",
-        "match",
-        "inline.app",
-        "scarabresearch.com",
-    ],
-    "NoiseBlock": ["msedge.net", "azurefd.net"],
-    "AppleService": ["apple.com", "icloud.com", "mzstatic.com", "safebrowsing.apple"],
-    # --- Entertainment ---
-    "Podcast": ["firstory.me"],
-    "Gaming": [
-        "steam",
-        "roblox",
-        "epicgames",
-        "riotgames",
-        "battlenet",
-        "minecraft",
-        "nintendo",
-        "playstation",
-        "xbox",
-    ],
-    "Spotify": [
-        "spotify.com",
-        "spotify.net",
-        "spotify.dev",
-        "googleusercontent.com/spotify.com",  # 針對您這次看到的特殊格式
-    ],
-    # --- Google Ecosystem ---
-    "YouTube": [
-        "youtube.com",
-        "googlevideo.com",
-        "ytimg.com",
-        "youtu.be",
-        "youtube-nocookie.com",
-    ],
-    "GoogleSearch": [
-        "www.google.com",
-        "m.google.com",
-        "csp.withgoogle.com",
-        "google.com.tw",
-    ],
-    "GoogleDocs": ["classroom.google.com", "docs.google", "drive.google"],
-    "Gmail": ["mail.google", "accounts.google"],
-    "GoogleSystem": [
-        "play.google.com",
-        "android.clients",
-        "gstatic.com",
-        "safebrowsing.google.com",
-        "mtalk.google.com",
-        "this-url-does-not-exist",
-        ".invalid",
-        "google.com",
-    ],
-}
+from config import process_domain, get_device_config
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
 
@@ -166,7 +68,9 @@ def send_telegram(token, chat_id, message, photo_paths=None):
     return True
 
 
-def push_to_cloud(dev_name, sorted_data):
+def push_to_cloud(
+    dev_name, sorted_data, report_type="schedule_event", recorded_at=None
+):
     # 1. 讀取 config.json
     try:
         with open("config.json", "r", encoding="utf-8") as f:
@@ -235,7 +139,12 @@ def push_to_cloud(dev_name, sorted_data):
         try:
             encrypted = cipher.encrypt(json_str.encode("utf-8"))
             base64_data = base64.b64encode(encrypted).decode("utf-8")
-            payload = {"device_id": dev_name, "data": base64_data}
+            payload = {
+                "device_id": dev_name,
+                "report_type": report_type,
+                "recorded_at": recorded_at,
+                "data": base64_data,
+            }
 
             resp = requests.post(url, json=payload, headers=headers, timeout=10)
 
@@ -265,35 +174,6 @@ def save_schedule_status(dev_name, period_name, target_date, status, start, end)
     conn.commit()
     conn.close()
 
-
-def get_device_config():
-    conn = sqlite3.connect(DB_PATH)
-    # 這裡將 row_factory 設為 sqlite3.Row，這樣可以用 config["device_name"] 存取
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    # 根據本機 IP (127.0.0.1) 抓取在資料庫中預設好的名稱與金鑰
-    cursor.execute(
-        "SELECT telegram_token, telegram_chat_id, device_name FROM devices WHERE ip_address = '127.0.0.1'"
-    )
-    config = cursor.fetchone()
-    conn.close()
-    
-    if config:
-        return {
-            "token": config["telegram_token"],
-            "chat_id": config["telegram_chat_id"],
-            "device_name": config["device_name"]
-        }
-    else:
-        # 如果找不到，才去抓 config.json 當備援，或給予預設值
-        with open("config.json", "r", encoding="utf-8") as f:
-            config_data = json.load(f)
-        return {
-            "token": config_data.get("telegram_token", ""),
-            "chat_id": config_data.get("telegram_chat_id", ""),
-            "device_name": config_data.get("device_name", "Unknown")
-        }
 
 def analyze_and_report(
     target_date,
@@ -333,20 +213,11 @@ def analyze_and_report(
     grouped_data = {}
     for row in all_rows:
         domain, count = row["domain"], row["count"]
-        if is_whitelisted(domain):
+        final_key, should_skip = process_domain(domain)
+
+        if should_skip:
             continue
 
-        matched_group = None
-        for group_name, keywords in DOMAIN_GROUPS.items():
-            if isinstance(keywords, list):
-                if any(k in domain.lower() for k in keywords):
-                    matched_group = group_name
-                    break
-            elif keywords in domain.lower():
-                matched_group = group_name
-                break
-
-        final_key = matched_group if matched_group else domain
         grouped_data[final_key] = grouped_data.get(final_key, 0) + count
 
     # 排序
@@ -355,11 +226,13 @@ def analyze_and_report(
         key=lambda x: x["count"],
         reverse=True,
     )
-    
+
     if not sorted_data:
         if record and period_name:
             # 標記為 2 (執行完成但無數據)
-            save_schedule_status(dev_name, period_name, target_date, 2, args.start, args.end)
+            save_schedule_status(
+                dev_name, period_name, target_date, 2, args.start, args.end
+            )
             print(f"📭 {target_date} {period_name} 時段無日誌數據。")
         else:
             print(f"📭 {target_date} 無日誌數據。")
@@ -373,7 +246,8 @@ def analyze_and_report(
         photos.append(bar_chart.generate_dns_bar(sorted_data, target_display, dev_name))
 
     # 組合報表
-    msg = f"🛡️ *{dev_name} {period_name} Top 20 通報* ({target_date}):\n"
+    display_period = period_name if period_name else "每日總結"
+    msg = f"🛡️ *{dev_name} {display_period} Top 20 通報* ({target_date}):\n"
     for i, row in enumerate(sorted_data[:20], 1):
         msg += f"{i}. `{row['domain']}` ({row['count']}次)\n"
     msg += f"━━━━━━━━━━━━\n⏰ 執行: {datetime.now().strftime('%H:%M:%S')}"
@@ -391,14 +265,18 @@ def analyze_and_report(
             # 如果帶有 period_name，更新 schedule_status (課表模式)
             if period_name:
                 # 標記為 1 (已成功發送)
-                save_schedule_status(dev_name, period_name, target_date, 1, args.start, args.end)
+                save_schedule_status(
+                    dev_name, period_name, target_date, 1, args.start, args.end
+                )
+                report_type = "schedule_event"
                 print(f"✅ {period_name} 狀態已確保更新為 1")
             else:
                 # 否則更新 system_status (每日補發模式)
+                report_type = "daily_summary"
                 update_system_status(target_display)
 
         # 同步至雲端
-        success = push_to_cloud(dev_name, sorted_data)
+        success = push_to_cloud(dev_name, sorted_data, report_type, target_date)
         if success:
             print(f"✅ {target_display} 已成功同步至雲端")
 

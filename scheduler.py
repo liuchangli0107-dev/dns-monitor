@@ -3,12 +3,12 @@ import os
 import sqlite3
 import subprocess
 import sys
-from analyzer import save_schedule_status, get_device_config
+from analyzer import save_schedule_status
+from config import get_device_config
 from datetime import datetime, timedelta
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
-
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
 
