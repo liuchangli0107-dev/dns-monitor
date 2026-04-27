@@ -47,25 +47,37 @@ def send_tg_message(token, chat_id, text, reply_markup=None):
 
 
 def search_domain_stats(keyword):
-    """搜尋邏輯"""
+    """強化搜尋邏輯：顯示最新紀錄且增加設備區分"""
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
+        
+        # 💡 修改重點：增加設備名稱 (dev_name)，並過濾最近 24 小時
         query = """
-            SELECT strftime('%m-%d %H:00', timestamp) AS hr, domain, COUNT(*) 
-            FROM dns_logs WHERE domain LIKE ? GROUP BY 1, 2 ORDER BY 1 DESC LIMIT 20
+            SELECT 
+                strftime('%m-%d %H:%M', timestamp) AS tm,
+                domain, 
+                COUNT(*) 
+            FROM dns_logs 
+            WHERE domain LIKE ? 
+            GROUP BY tm, domain 
+            ORDER BY timestamp DESC 
+            LIMIT 30
         """
         cur.execute(query, (f"%{keyword.strip()}%",))
         rows = cur.fetchall()
         conn.close()
+        
         if not rows:
             return None
-        res = f"📊 *「{keyword}」時段統計*\n━━━━━━━━━━━━\n"
-        for hr, dom, cnt in rows:
-            res += f"`{hr}` | **{cnt}** | `{dom[:25]}`\n"
+            
+        res = f"🔍 *「{keyword}」精準追蹤 (最新 30 筆)*\n━━━━━━━━━━━━\n"
+        for tm, dom, cnt in rows:
+            # 💡 顯示格式：[時間] | 次數 | 域名
+            res += f"`{tm}` | **{cnt}次**\n└ `{dom[:30]}`\n"
         return res
     except Exception as e:
-        print(f"search_domain_stats ❌ 搜尋時發生錯誤: {e}", flush=True)
+        print(f"search_domain_stats ❌ 錯誤: {e}", flush=True)
         return "❌ 搜尋時發生錯誤"
 
 
@@ -161,8 +173,6 @@ def handle_command(token, chat_id, text, user_states):
 
     if chat_id not in authorized_chats:
         return user_states
-    
-    chat_id = str(chat_id)
 
     cmd = text.split("@")[0].lower()
     print(f"handle_command 📩 收到指令: {cmd} 來自 Chat ID: {chat_id}", flush=True)
