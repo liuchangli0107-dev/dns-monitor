@@ -328,35 +328,47 @@ def start_polling():
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
-            # 讀取 POST 過來的資料長度
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data)
             
-            # 取得擴充功能傳來的欄位 (device, domain)
+            # 1. 取得擴充功能傳來的設備名稱 (例如: 'iMac-Home' 或 'Olivia-MacBook')
             dev_name = data.get('device', 'Unknown-Device')
             domain = data.get('domain')
             
+            print(f"📡 Webhook: {dev_name} / {domain}", flush=True)
+            
             if domain:
-                # 直接寫入你的 dns_logs.db
                 conn = sqlite3.connect(DB_PATH)
                 cur = conn.cursor()
+
+                # 2. 根據 device_name 從 devices 表查詢對應的 ip_address
+                # 假設您的 devices 表欄位是 device_name 和 ip_address
+                cur.execute("SELECT ip_address FROM devices WHERE device_name = ?", (dev_name,))
+                result = cur.fetchone()
+                
+                # 如果查得到就用表裡的 IP，查不到就暫時用設備名稱代替，或設為 Unknown
+                client_ip = result[0] if result else '127.0.0.1'
+
+                # 3. 寫入 dns_logs (維持原結構，將 IP 寫入原本存放 client_ip 的欄位)
+                # 假設您的 dns_logs 順位是 (client_ip, domain, timestamp)
                 cur.execute(
-                    "INSERT INTO dns_logs (timestamp, device_name, domain) VALUES (DATETIME('now','localtime'), ?, ?)",
-                    (dev_name, domain)
+                    "INSERT INTO dns_logs (client_ip, domain, timestamp) VALUES (?, ?, DATETIME('now','localtime'))",
+                    (client_ip, domain)
                 )
+                
                 conn.commit()
                 conn.close()
-                print(f"📡 Webhook 補強成功: {dev_name} -> {domain}", flush=True)
+                print(f"📡 Webhook 補強成功: {dev_name} ({client_ip}) -> {domain}", flush=True)
             
-            # 回傳成功給擴充功能 (解決跨網域 CORS 問題)
+            # 回應成功
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*') 
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             self.wfile.write(b'{"status":"success"}')
         except Exception as e:
-            print(f"❌ Webhook 寫入出錯: {e}", flush=True)
+            print(f"❌ Webhook 處理失敗: {e}", flush=True)
             self.send_response(500)
             self.end_headers()
 
