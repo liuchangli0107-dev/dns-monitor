@@ -215,7 +215,14 @@ truncate -s 0 /Users/$(whoami)/dns-monitor/*.log
 
 雲端同步: 呼叫 push_to_cloud 將數據推送至 Cloud Run。
 
+
+## 📊 補強瀏覽器DNS的運作特性導致數據缺失的解決方案 (2026-04-28)
+
+建立了 Webhook 接口：讓 Chrome 擴充功能直接把資料 POST 回來。
+
+優化了 API 連線：(50, 60) 的超時設定。
+
 ---
 
 **Maintainer**: Charlie Liu
-**Last Updated**: 2026-04-26
+**Last Updated**: 2026-04-28

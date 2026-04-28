@@ -277,9 +277,11 @@ def start_polling():
     while True:
         try:
             url = f"https://api.telegram.org/bot{token}/getUpdates"
-            resp = requests.get(
-                url, params={"offset": last_update_id + 1, "timeout": 30}, timeout=35
-            ).json()
+            resp_obj = requests.get(
+                url, params={"offset": last_update_id + 1, "timeout": 50}, timeout=60
+            )
+            resp_obj.raise_for_status()  # 💡 增加這一行，若伺服器噴錯 (如 502) 會拋出異常，避免解析 JSON 失敗
+            resp = resp_obj.json()
             print(f"start_polling DEBUG: Telegram API 回應: {resp}", flush=True)
 
             if resp.get("ok"):
@@ -328,43 +330,48 @@ def start_polling():
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
-            content_length = int(self.headers['Content-Length'])
+            content_length = int(self.headers["Content-Length"])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data)
-            
+
             # 1. 取得擴充功能傳來的設備名稱 (例如: 'iMac-Home' 或 'Olivia-MacBook')
-            dev_name = data.get('device', 'Unknown-Device')
-            domain = data.get('domain')
-            
+            dev_name = data.get("device", "Unknown-Device")
+            domain = data.get("domain")
+
             print(f"📡 Webhook: {dev_name} / {domain}", flush=True)
-            
+
             if domain:
                 conn = sqlite3.connect(DB_PATH)
                 cur = conn.cursor()
 
                 # 2. 根據 device_name 從 devices 表查詢對應的 ip_address
                 # 假設您的 devices 表欄位是 device_name 和 ip_address
-                cur.execute("SELECT ip_address FROM devices WHERE device_name = ?", (dev_name,))
+                cur.execute(
+                    "SELECT ip_address FROM devices WHERE device_name = ?", (dev_name,)
+                )
                 result = cur.fetchone()
-                
+
                 # 如果查得到就用表裡的 IP，查不到就暫時用設備名稱代替，或設為 Unknown
-                client_ip = result[0] if result else '127.0.0.1'
+                client_ip = result[0] if result else "127.0.0.1"
 
                 # 3. 寫入 dns_logs (維持原結構，將 IP 寫入原本存放 client_ip 的欄位)
                 # 假設您的 dns_logs 順位是 (client_ip, domain, timestamp)
                 cur.execute(
                     "INSERT INTO dns_logs (client_ip, domain, timestamp) VALUES (?, ?, DATETIME('now','localtime'))",
-                    (client_ip, domain)
+                    (client_ip, domain),
                 )
-                
+
                 conn.commit()
                 conn.close()
-                print(f"📡 Webhook 補強成功: {dev_name} ({client_ip}) -> {domain}", flush=True)
-            
+                print(
+                    f"📡 Webhook 補強成功: {dev_name} ({client_ip}) -> {domain}",
+                    flush=True,
+                )
+
             # 回應成功
             self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header("Content-type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(b'{"status":"success"}')
         except Exception as e:
@@ -375,7 +382,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 def start_webhook_server():
     # 監聽所有 IP (0.0.0.0)，使用 8080 端口
-    server = HTTPServer(('0.0.0.0', 8080), WebhookHandler)
+    server = HTTPServer(("0.0.0.0", 8080), WebhookHandler)
     print("🌐 Webhook 接收站已啟動 (Port 8080)...", flush=True)
     server.serve_forever()
 
@@ -384,6 +391,6 @@ if __name__ == "__main__":
     # 使用 Thread 讓 Webhook 在背景跑，不卡住原本的 start_polling
     t = threading.Thread(target=start_webhook_server, daemon=True)
     t.start()
-    
+
     # 執行你原本的 Bot 邏輯
     start_polling()
