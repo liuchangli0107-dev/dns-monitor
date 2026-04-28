@@ -1,4 +1,6 @@
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+import threading
 import time
 import requests
 import sqlite3
@@ -51,7 +53,7 @@ def search_domain_stats(keyword):
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        
+
         # 💡 修改重點：增加設備名稱 (dev_name)，並過濾最近 24 小時
         query = """
             SELECT 
@@ -67,10 +69,10 @@ def search_domain_stats(keyword):
         cur.execute(query, (f"%{keyword.strip()}%",))
         rows = cur.fetchall()
         conn.close()
-        
+
         if not rows:
             return None
-            
+
         res = f"🔍 *「{keyword}」精準追蹤 (最新 30 筆)*\n━━━━━━━━━━━━\n"
         for tm, dom, cnt in rows:
             # 💡 顯示格式：[時間] | 次數 | 域名
@@ -168,7 +170,7 @@ def cmd_cancel(token, chat_id, user_states):
 def handle_command(token, chat_id, text, user_states):
     chat_id = str(chat_id)
     _, authorized_chats = get_bot_config()
-    
+
     print(f"handle_command DEBUG: {chat_id} user_states: {user_states}", flush=True)
 
     if chat_id not in authorized_chats:
@@ -191,7 +193,10 @@ def handle_command(token, chat_id, text, user_states):
         return cmd_search(token, chat_id, user_states)
 
     state = user_states.get(chat_id)
-    print(f"handle_command DEBUG: {chat_id} user_states: {user_states} state: {state}", flush=True)
+    print(
+        f"handle_command DEBUG: {chat_id} user_states: {user_states} state: {state}",
+        flush=True,
+    )
     if state:
         input_text = text.strip()
         if state["type"] == "report":
@@ -220,13 +225,12 @@ def handle_callback(token, chat_id, callback_query, user_states):
     data = callback_query["data"]
     callback_id = callback_query["id"]
     chat_id = str(chat_id)
-    
+
     print(
         f"handle_callback 📩 收到按鈕事件: {data} 來自 Chat ID: {chat_id}", flush=True
     )
-    
-    print(f"handle_callback DEBUG: {chat_id} 狀態: {user_states}", flush=True)
 
+    print(f"handle_callback DEBUG: {chat_id} 狀態: {user_states}", flush=True)
 
     if data == "search":
         user_states = cmd_search(token, chat_id, user_states)
@@ -321,5 +325,53 @@ def start_polling():
             time.sleep(wait_time)
 
 
+class WebhookHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        try:
+            # 讀取 POST 過來的資料長度
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data)
+            
+            # 取得擴充功能傳來的欄位 (device, domain)
+            dev_name = data.get('device', 'Unknown-Device')
+            domain = data.get('domain')
+            
+            if domain:
+                # 直接寫入你的 dns_logs.db
+                conn = sqlite3.connect(DB_PATH)
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT INTO dns_logs (timestamp, device_name, domain) VALUES (DATETIME('now','localtime'), ?, ?)",
+                    (dev_name, domain)
+                )
+                conn.commit()
+                conn.close()
+                print(f"📡 Webhook 補強成功: {dev_name} -> {domain}", flush=True)
+            
+            # 回傳成功給擴充功能 (解決跨網域 CORS 問題)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*') 
+            self.end_headers()
+            self.wfile.write(b'{"status":"success"}')
+        except Exception as e:
+            print(f"❌ Webhook 寫入出錯: {e}", flush=True)
+            self.send_response(500)
+            self.end_headers()
+
+
+def start_webhook_server():
+    # 監聽所有 IP (0.0.0.0)，使用 8080 端口
+    server = HTTPServer(('0.0.0.0', 8080), WebhookHandler)
+    print("🌐 Webhook 接收站已啟動 (Port 8080)...", flush=True)
+    server.serve_forever()
+
+
 if __name__ == "__main__":
+    # 使用 Thread 讓 Webhook 在背景跑，不卡住原本的 start_polling
+    t = threading.Thread(target=start_webhook_server, daemon=True)
+    t.start()
+    
+    # 執行你原本的 Bot 邏輯
     start_polling()
