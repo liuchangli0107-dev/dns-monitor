@@ -222,7 +222,21 @@ truncate -s 0 /Users/$(whoami)/dns-monitor/*.log
 
 優化了 API 連線：(50, 60) 的超時設定。
 
+
+## 📊 新增功能：Google Drive 配置同步 (2026-04-30)
+
+系統現在支援透過 Google Drive API 遠端管理課表，實現「雲端改檔，家裡生效」。
+
+* **OAuth 2.0 驗證**：初次執行需通過 `client_secrets.json` 授權，並產生永久權杖 `token.pickle` 供背景靜默執行。
+* **自動 Git Pull**：在同步配置的同時，自動檢查 GitHub 上的代碼更新，實現無感升級。
+* **配置範例 (`config.json`)**：
+    ```json
+    {
+        "remote_file_id": "YOUR_GOOGLE_DRIVE_FILE_ID",
+        "schedules": [...]
+    }
+    ```
 ---
 
 **Maintainer**: Charlie Liu
-**Last Updated**: 2026-04-28
+**Last Updated**: 2026-04-30

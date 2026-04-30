@@ -1,10 +1,12 @@
 # --- 1. 敏感資訊 (Security) ---
-config.json
 Corefile
+*.json
 *.db
 *.sh
 *.sql
 *.pem
+*.plist
+token.pickle
 
 # --- 2. 紀錄與報告 (Logs & Reports) ---
 report/
