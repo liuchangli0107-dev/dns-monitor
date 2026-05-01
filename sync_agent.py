@@ -76,15 +76,18 @@ def sync_git_and_restart():
     token = config.get('telegram_token')
     chat_id = config.get('telegram_chat_id')
     try:
-        result = subprocess.run(['git', 'pull', 'origin', 'main'], capture_output=True, text=True)
+        result = subprocess.run(['git', 'pull', 'origin', 'main'], cwd=BASE_DIR, capture_output=True, text=True)
         if "Already up to date." not in result.stdout:
-            commit_msg = subprocess.check_output(['git', 'log', '-1', '--pretty=%B'], text=True).strip()
+            commit_msg = subprocess.check_output(
+                ['git', 'log', '-1', '--pretty=%B'], 
+                cwd=BASE_DIR, text=True
+            ).strip()
             update_text = (
                 "🚀 *系統自動更新通報*\n"
                 "━━━━━━━━━━━━\n"
                 f"✅ **代碼已更新**\n"
                 f"📝 **異動摘要**：\n`{commit_msg}`\n\n"
-                "🔄 正在執行 `restart.sh` 重啟服務..."
+                "🔄 正在執行重啟服務..."
             )
             if token and chat_id:
                 send_tg_message(token, chat_id, update_text)
@@ -95,7 +98,8 @@ def sync_git_and_restart():
     except Exception as e:
         error_msg = f"❌ Git 更新失敗: {e}"
         print(error_msg)
-        send_tg_message(token, chat_id, error_msg)
+        if token and chat_id:
+            send_tg_message(token, chat_id, error_msg)
         return False
 
 if __name__ == "__main__":
