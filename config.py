@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import sqlite3
@@ -6,10 +7,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
-# --- 定義歸類規則 ---
 DOMAIN_GROUPS = {
-    # --- Cloud & Development ---
-    "CloudDevEnv": [
+    "☁️ CloudDevEnv": [
         "cloudworkstations.dev",
         "run.app",
         "googleworkstations.com",
@@ -17,7 +16,7 @@ DOMAIN_GROUPS = {
         "cloud.google.com",
         "gemini.google.com",
     ],
-    "Firebase": [
+    "🔥 Firebase": [
         "firebase",
         "app-measurement.com",
         "firebaselogging",
@@ -27,26 +26,24 @@ DOMAIN_GROUPS = {
         "web.app",
         "firebaseapp.com",
     ],
-    "GitHub": [
+    "🐙 GitHub": [
         "github.com",
         "githubassets.com",
         "githubusercontent.com",
         "githubcopilot.com",
         "github-cloud.s3.amazonaws.com",
     ],
-    "ChatGPT": ["chatgpt.com", "openai.com"],
-    # --- Social & Communication ---
-    "Line": ["line-apps.com", "line.me"],
-    "Facebook": ["facebook.com", "fbcdn.net", "messenger.com"],
-    "Instagram": ["instagram.com", "cdninstagram.com"],
-    "Discord": ["discord", "discordapp", "discord.gg"],
-    # --- Productivity & Work ---
-    "JobSearch": ["104.com.tw"],
-    "Meeting": ["zoom.us", "webex.com", "microsoft.com/microsoft-teams"],
-    "Canva": ["canva.com", "canva-static.com"],
-    "Grammarly": "grammarly",
-    # --- Security & Blocking ---
-    "AdsTracker": [
+    "🤖 ChatGPT": ["chatgpt.com", "openai.com"],
+    "🟢 Line": ["line-apps.com", "line.me"],
+    "🔵 Facebook": ["facebook.com", "fbcdn.net", "messenger.com"],
+    "📸 Instagram": ["instagram.com", "cdninstagram.com"],
+    "👾 Discord": ["discord", "discordapp", "discord.gg"],
+    "🔍 Job Search": ["104.com.tw"],
+    "📞 Meeting": ["zoom.us", "webex.com", "microsoft.com/microsoft-teams"],
+    "🎨 Canva": ["canva.com", "canva-static.com"],
+    "✍️ Grammarly": "grammarly",
+    "🏫 Fuhsing School": "fhjh.tp.edu.tw",
+    "🚫 AdsTracker": [
         "ads",
         "track",
         "pixel",
@@ -56,11 +53,10 @@ DOMAIN_GROUPS = {
         "inline.app",
         "scarabresearch.com",
     ],
-    "NoiseBlock": ["msedge.net", "azurefd.net"],
-    "AppleService": ["apple.com", "icloud.com", "mzstatic.com", "safebrowsing.apple"],
-    # --- Entertainment ---
-    "Podcast": ["firstory.me"],
-    "Gaming": [
+    "🧹 NoiseBlock": ["msedge.net", "azurefd.net"],
+    "🍎 Apple Service": ["apple.com", "icloud.com", "mzstatic.com", "safebrowsing.apple"],
+    "🎙️ Podcast": ["firstory.me"],
+    "🎮 Gaming": [
         "steam",
         "roblox",
         "epicgames",
@@ -71,29 +67,28 @@ DOMAIN_GROUPS = {
         "playstation",
         "xbox",
     ],
-    "Spotify": [
+    "🎵 Spotify": [
         "spotify.com",
         "spotify.net",
         "spotify.dev",
         "googleusercontent.com/spotify.com",
     ],
-    # --- Google Ecosystem ---
-    "YouTube": [
+    "📺 YouTube": [
         "youtube.com",
         "googlevideo.com",
         "ytimg.com",
         "youtu.be",
         "youtube-nocookie.com",
     ],
-    "GoogleSearch": [
+    "🔎 Google Search": [
         "www.google.com",
         "m.google.com",
         "csp.withgoogle.com",
         "google.com.tw",
     ],
-    "GoogleDocs": ["classroom.google.com", "docs.google", "drive.google"],
-    "Gmail": ["mail.google", "accounts.google"],
-    "GoogleSystem": [
+    "📝 Google Docs": ["classroom.google.com", "docs.google", "drive.google"],
+    "📧 Gmail": ["mail.google", "accounts.google"],
+    "⚙️ Google System": [
         "play.google.com",
         "android.clients",
         "gstatic.com",
@@ -210,6 +205,10 @@ WHITELIST_PATTERNS = [
     r".*doubleclick\.net.*",
     r".*scorecardresearch\.com.*",
     r".*googlesyndication\.com.*",
+    r".*gum\.criteo\.com.*",
+    r".*mug\.criteo\.com.*",
+    r".*connect\.facebook\.net.*",
+    r".*likr\.tw.*"
 ]
 
 # 預先編譯以提高效能
@@ -217,46 +216,31 @@ COMPILED_WHITELIST = [re.compile(p, re.IGNORECASE) for p in WHITELIST_PATTERNS]
 
 
 def is_whitelisted(domain):
-    """檢查該網域是否屬於應被忽略的系統背景雜訊"""
     return any(pattern.match(domain) for pattern in COMPILED_WHITELIST)
 
 
-# 處理網域：
-# 1. 檢查是否在白名單 (過濾雜訊/廣告)
-# 2. 檢查是否屬於特定群組 (歸類合併)
-# 回傳: (final_key, should_skip)
 def process_domain(domain):
     domain_lower = domain.lower()
-
-    # 先過濾雜訊與廣告
     if is_whitelisted(domain_lower):
         return None, True
-
-    # 進行歸類合併
     for group_name, keywords in DOMAIN_GROUPS.items():
         if isinstance(keywords, list):
             if any(k in domain_lower for k in keywords):
                 return group_name, False
         elif keywords in domain_lower:
             return group_name, False
-
-    # 若都不符合，回傳原始網域
     return domain, False
 
 
 def get_device_config():
     conn = sqlite3.connect(DB_PATH)
-    # 這裡將 row_factory 設為 sqlite3.Row，這樣可以用 config["device_name"] 存取
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-
-    # 根據本機 IP (127.0.0.1) 抓取在資料庫中預設好的名稱與金鑰
     cursor.execute(
         "SELECT telegram_token, telegram_chat_id, device_name FROM devices WHERE ip_address = '127.0.0.1'"
     )
     config = cursor.fetchone()
     conn.close()
-
     if config:
         return {
             "telegram_token": config["telegram_token"],
@@ -264,7 +248,6 @@ def get_device_config():
             "device_name": config["device_name"],
         }
     else:
-        # 如果找不到，才去抓 config.json 當備援，或給予預設值
         with open("config.json", "r", encoding="utf-8") as f:
             config_data = json.load(f)
         return {
