@@ -130,9 +130,11 @@ if __name__ == "__main__":
         print(f"💾 本地 {LOCAL_CONFIG_PATH} 已更新。")
         if 'schedules' in remote_data:
             print(f"📡 成功讀取雲端課表，共計 {len(remote_data['schedules'])} 條規則")
-        restarted = sync_git_and_restart()
-        if not restarted:
-            print("✅ 無需更新，系統運行中")
+        restarted = sync_git_and_restart()  
+        if restarted:
+            print("🚀 系統已完成更新並重啟。")
+        else:
+            print("✅ 檢查完成，目前無需更新。")
         print(f"🏁 [{datetime.datetime.now().strftime('%H:%M:%S')}] 同步任務完成。")
     except Exception as e:
         print(f"❌ [{now}] 同步失敗: {e}")
