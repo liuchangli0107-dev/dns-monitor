@@ -1,4 +1,5 @@
 import datetime
+import getpass
 import os
 import pickle
 import subprocess
@@ -71,12 +72,29 @@ def apply_schedules(remote_config):
 
 
 def sync_git_and_restart():
-    print("🔄 檢查 Git 更新...")
     config = get_device_config()
     token = config.get('telegram_token')
     chat_id = config.get('telegram_chat_id')
+    dev_name = config.get('device_name', 'Unknown')
+    current_user = getpass.getuser()
+
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"🔄 [{now}] 檢查 Git 更新... (執行者: {current_user}, 路徑: {BASE_DIR})")
+    
     try:
         result = subprocess.run(['git', 'pull', 'origin', 'main'], cwd=BASE_DIR, capture_output=True, text=True)
+        if result.returncode != 0:
+            error_report = (
+                f"❌ ** [{now}] Git 同步失敗 ({dev_name})**\n"
+                f"━━━━━━━━━━━━\n"
+                f"👤 帳號：`{current_user}`\n"
+                f"📂 路徑：`{BASE_DIR}`\n"
+                f"⚠️ 錯誤：\n`{result.stderr.strip()}`"
+            )
+            if token and chat_id:
+                send_tg_message(token, chat_id, error_report)
+            return False
+        
         if "Already up to date." not in result.stdout:
             commit_msg = subprocess.check_output(
                 ['git', 'log', '-1', '--pretty=%B'], 
@@ -96,7 +114,7 @@ def sync_git_and_restart():
             return True
         return False
     except Exception as e:
-        error_msg = f"❌ Git 更新失敗: {e}"
+        error_msg = f"❌ [{now}] Git 更新失敗: {e}"
         print(error_msg)
         if token and chat_id:
             send_tg_message(token, chat_id, error_msg)
