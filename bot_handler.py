@@ -1,7 +1,9 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
+from pathlib import Path
 import threading
 import time
+from google import genai
 import requests
 import sqlite3
 import os
@@ -13,7 +15,7 @@ from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
-
+CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 def get_bot_config():
     try:
@@ -85,6 +87,55 @@ def search_domain_stats(keyword, page=0):
         return "❌ 搜尋時發生錯誤", None
 
 
+# 執行系統指令並回傳結果 (例如: git version, ls, ps, df)
+def run_command(command: str) -> str:
+    try:
+        # 設定超時防止指令卡死
+        result = subprocess.check_output(command, shell=True, stderr=subprocess.STDOUT, timeout=20)
+        return result.decode('utf-8')
+    except subprocess.CalledProcessError as e:
+        return f"指令回傳錯誤代碼: {e.returncode}\n輸出: {e.output.decode('utf-8')}"
+    except Exception as e:
+        return f"執行異常: {str(e)}"
+
+
+# 讀取或寫入專案目錄下的特定檔案 (例如: watcher.py, config.json)
+def read_local_file(path: str) -> str:
+    full_path = os.path.join(BASE_DIR, path)
+    try:
+        with open(full_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        return f"讀取失敗: {str(e)}"
+
+
+# 寫入或修改專案目錄下的特定檔案內容 (例如: watcher.py, config.json)
+def write_local_file(path: str, content: str) -> str:
+    full_path = os.path.join(BASE_DIR, path)
+    try:
+        with open(full_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return f"✅ 檔案 {path} 已更新成功。"
+    except Exception as e:
+        return f"寫入失敗: {str(e)}"
+
+def cmd_gemini(token, chat_id, user_states):
+    user_states[chat_id] = {"type": "gemini"}
+    reply_markup = {
+        "inline_keyboard": [
+            [
+                {"text": "🚫 取消操作", "callback_data": "cancel"},
+            ],
+        ]
+    }
+    guide_msg = (
+        "🤖 *Gemini 模式*\n\n"
+        "我現在可以幫您修改 `watcher.py` 或分析日誌。\n"
+        "請輸入您的指令（例如：`幫我在程式碼頂部加入測試註解`）"
+    )
+    send_tg_message(token, chat_id, guide_msg, reply_markup)
+    return user_states
+
 def cmd_help(token, chat_id, user_states):
     help_msg = "🤖 *DNS 助理*\n📊 `/report` - 生成報表\n🔍 `/search` - 搜尋網域\n🚫 `/cancel` - 取消操作"
     reply_markup = {
@@ -94,7 +145,7 @@ def cmd_help(token, chat_id, user_states):
                 {"text": "🔍 搜尋網域", "callback_data": "search"},
             ],
             [
-                {"text": "🤖 操作說明", "callback_data": "help"},
+                {"text": "🤖 Gemini", "callback_data": "gemini"},
                 {"text": "🚫 取消操作", "callback_data": "cancel"},
             ],
         ]
@@ -165,7 +216,10 @@ def handle_command(token, chat_id, text, user_states):
     _, authorized_chats = get_bot_config()
     if chat_id not in authorized_chats:
         return user_states
+    
     cmd = text.split("@")[0].lower()
+    if cmd in ["/gemini", "gemini"]:
+        return cmd_gemini(token, chat_id, user_states)
     if cmd in ["/help", "/start", "hi", "你好"]:
         return cmd_help(token, chat_id, user_states)
     if cmd in ["/cancel", "取消"]:
@@ -174,27 +228,54 @@ def handle_command(token, chat_id, text, user_states):
         return cmd_report(token, chat_id, user_states)
     if cmd in ["/search", "搜尋"]:
         return cmd_search(token, chat_id, user_states)
+
     state = user_states.get(chat_id)
     if state:
         input_text = text.strip()
-        if state["type"] == "report":
+        
+        # --- Gemini 完全體邏輯區塊 ---
+        if state["type"] == "gemini":
+            user_states[chat_id] = {"type": ""} 
+            send_tg_message(token, chat_id, "⌛ Gemini 代理人正在執行任務...")
+            
+            try:
+                with open(CONFIG_PATH, 'r') as f:
+                    config = json.load(f)
+                    api_key = config.get("api_key")
+                    model_id = config.get("model", "gemini-2.0-flash") # 建議使用支援工具呼叫的模型
+                
+                client = genai.Client(api_key=api_key)
+                
+                # 初始化一個具有工具箱的對話 Session
+                chat = client.chats.create(
+                    model=model_id,
+                    config={
+                        'tools': [run_command, read_local_file, write_local_file],
+                        'system_instruction': f"你是一個專業的系統管理助理，運行在 iMac-Home 的 '{BASE_DIR}' 目錄下。你可以執行指令、讀取檔案或寫入程式碼來解決使用者的問題。請優先採取行動並回報結果。"
+                    }
+                )
+                
+                # 傳送指令，SDK 會自動處理 Function Calling 的往返過程
+                response = chat.send_message(input_text)
+                
+                send_tg_message(token, chat_id, f"🤖 *代理人回報：*\n\n{response.text}")
+                
+            except Exception as e:
+                send_tg_message(token, chat_id, f"❌ 代理人執行失敗: {e}")
+        # --- Gemini 區塊結束 ---
+
+        elif state["type"] == "report":
             send_tg_message(token, chat_id, f"⌛ 正在生成 `{input_text}` 報表...")
-            # 使用 sys.executable 確保環境一致
-            subprocess.run(
-                [sys.executable, "analyzer.py", input_text, "--type", "both"]
-            )
+            subprocess.run([sys.executable, "analyzer.py", input_text, "--type", "both"])
             user_states[chat_id] = {"type": ""}
+            
         elif state["type"] == "search":
-            # 💡 這裡要接收兩個回傳值：result (文字) 和 reply_markup (按鈕)
             result, reply_markup = search_domain_stats(input_text) 
             if result:
                 send_tg_message(token, chat_id, result, reply_markup)
             else:
-                send_tg_message(
-                    token,
-                    chat_id,
-                    f"❌ 找不到 `{input_text}`，請重試或輸入 `/cancel`：",
-                )
+                send_tg_message(token, chat_id, f"❌ 找不到 `{input_text}`，請重試或輸入 `/cancel`：")
+                
     return user_states
 
 
@@ -202,9 +283,11 @@ def handle_callback(token, chat_id, callback_query, user_states):
     data = callback_query["data"]
     callback_id = callback_query["id"]
     chat_id = str(chat_id)
+    if data == "gemini":
+        user_states = cmd_gemini(token, chat_id, user_states)
     if data == "search":
         user_states = cmd_search(token, chat_id, user_states)
-    elif data.startswith("search_p_"):
+    if data.startswith("search_p_"):
         _, _, page_str, keyword = data.split("_", 3)
         page = int(page_str)
         result, reply_markup = search_domain_stats(keyword, page)
@@ -224,11 +307,11 @@ def handle_callback(token, chat_id, callback_query, user_states):
                 f"https://api.telegram.org/bot{token}/answerCallbackQuery",
                 data={"callback_query_id": callback_query["id"], "text": "❌ 沒有更多結果了", "show_alert": False}
             )
-    elif data == "help":
+    if data == "help":
         user_states = cmd_help(token, chat_id, user_states)
-    elif data == "report":
+    if data == "report":
         user_states = cmd_report(token, chat_id, user_states)
-    elif data == "cancel":
+    if data == "cancel":
         user_states = cmd_cancel(token, chat_id, user_states)
     # ⚠️ 必須回傳 answer，手機端按鈕才不會一直轉圈圈
     try:

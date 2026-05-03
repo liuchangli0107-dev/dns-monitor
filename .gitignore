@@ -6,6 +6,7 @@ Corefile
 *.sql
 *.pem
 *.plist
+*.yaml
 token.pickle
 
 # --- 2. 紀錄與報告 (Logs & Reports) ---
