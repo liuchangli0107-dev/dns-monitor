@@ -1,6 +1,6 @@
 # DNS Monitor & Family Protector 🛡️
 
-這是一套基於 macOS (iMac-Server) 運作的家庭 DNS 監控系統。透過 **CoreDNS** 攔截請求，並結合 **Python** 背景監控腳本與 **Telegram Bot**，實現 24/7 的流量監測、設備自動識別與每日統計通報。從即時攔截到週期性的統計報表，形成了一個封閉且具備自我修復能力的環環相扣體系。
+這是一套基於 macOS (iMac and MacBook) 運作的家庭 DNS 監控系統。透過 **CoreDNS** 攔截請求，並結合 **Python** 背景監控腳本與 **Telegram Bot**，實現 24/7 的流量監測、設備自動識別與每日統計通報。從即時攔截到週期性的統計報表，形成了一個封閉且具備自我修復能力的環環相扣體系。
 
 三層防線的技術需求與運作邏輯：
 
