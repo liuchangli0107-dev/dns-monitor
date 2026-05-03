@@ -14,12 +14,12 @@ def test_whitelist_filtering():
 def test_domain_grouping():
     # 測試 GitHub 歸類
     group, skip = process_domain("github.com")
-    assert group == "GitHub"
+    assert group == "🐙 GitHub"
     assert skip is False
 
     # 測試 CloudDevEnv 歸類
     group, skip = process_domain("console.cloud.google.com")
-    assert group == "CloudDevEnv"
+    assert group == "☁️ CloudDevEnv"
     assert skip is False
 
 def test_unknown_domain():
