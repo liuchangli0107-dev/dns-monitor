@@ -130,8 +130,8 @@ def cmd_gemini(token, chat_id, user_states):
     }
     guide_msg = (
         "🤖 *Gemini 模式*\n\n"
-        "我現在可以幫您修改 `watcher.py` 或分析日誌。\n"
-        "請輸入您的指令（例如：`幫我在程式碼頂部加入測試註解`）"
+        "我現在可以幫您修改程式碼或分析日誌。\n"
+        "請輸入您的指令（例如：`幫我在程式碼頂部加入測試註解`），建議在指令中加入：「請精簡分析，直接列出重點。」"
     )
     send_tg_message(token, chat_id, guide_msg, reply_markup)
     return user_states
@@ -233,35 +233,44 @@ def handle_command(token, chat_id, text, user_states):
     if state:
         input_text = text.strip()
         
-        # --- Gemini 完全體邏輯區塊 ---
+        # --- Gemini 邏輯區塊 ---
         if state["type"] == "gemini":
+            # 先將狀態清空，避免使用者重複觸發
             user_states[chat_id] = {"type": ""} 
             send_tg_message(token, chat_id, "⌛ Gemini 代理人正在執行任務...")
             
             try:
+                # --- 第一階段：初始化 ---
                 with open(CONFIG_PATH, 'r') as f:
                     config = json.load(f)
                     api_key = config.get("api_key")
-                    model_id = config.get("model", "gemini-2.0-flash") # 建議使用支援工具呼叫的模型
+                    model_id = config.get("model", "gemini-2.0-flash")
                 
                 client = genai.Client(api_key=api_key)
-                
-                # 初始化一個具有工具箱的對話 Session
                 chat = client.chats.create(
                     model=model_id,
                     config={
                         'tools': [run_command, read_local_file, write_local_file],
-                        'system_instruction': f"你是一個專業的系統管理助理，運行在 iMac-Home 的 '{BASE_DIR}' 目錄下。你可以執行指令、讀取檔案或寫入程式碼來解決使用者的問題。請優先採取行動並回報結果。"
+                        'system_instruction': "你是一個專業的系統助理..."
                     }
                 )
                 
-                # 傳送指令，SDK 會自動處理 Function Calling 的往返過程
+                # --- 第二階段：傳送指令 ---
                 response = chat.send_message(input_text)
                 
-                send_tg_message(token, chat_id, f"🤖 *代理人回報：*\n\n{response.text}")
+                # 安全解析回覆內容
+                if response.text:
+                    reply_text = response.text
+                else:
+                    reply_text = "AI 已完成操作，但未提供文字說明。"
                 
+                send_tg_message(token, chat_id, f"🤖 *代理人回報：*\n\n{reply_text}")
+
             except Exception as e:
-                send_tg_message(token, chat_id, f"❌ 代理人執行失敗: {e}")
+                # 統一捕捉所有階段的錯誤並回報給 Telegram
+                error_detail = f"❌ 執行失敗: {str(e)}"
+                print(f"DEBUG: {error_detail}", flush=True) # 終端機也要留紀錄
+                send_tg_message(token, chat_id, error_detail)
         # --- Gemini 區塊結束 ---
 
         elif state["type"] == "report":

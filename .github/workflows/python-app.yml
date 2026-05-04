@@ -21,7 +21,14 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest requests pycryptodome matplotlib pandas
+        pip install pytest requests pycryptodome matplotlib pandas google-genai
+
+    - name: Create config.json
+      run: |
+        echo '{
+          "api_key": "${{ env.GEMINI_API_KEY }}",
+          "model": "gemini-2.5-flash"
+        }' > config.json
 
     - name: Run Unit Tests with pytest
       run: |
