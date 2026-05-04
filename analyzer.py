@@ -25,8 +25,12 @@ os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
 
+def log_print(message):
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+    
+
+# 更新 SQLite 紀錄表 (自動排程模式才呼叫)
 def update_system_status(target_date):
-    """更新 SQLite 紀錄表 (自動排程模式才呼叫)"""
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         "INSERT INTO system_status (task_name, last_run_date) VALUES (?, ?)",
@@ -76,14 +80,14 @@ def push_to_cloud(
         with open("config.json", "r", encoding="utf-8") as f:
             config_dict = json.load(f)
     except Exception as e:
-        print(f"❌ 無法讀取 config.json: {e}")
+        log_print(f"❌ 無法讀取 config.json: {e}")
         return False
 
     url = config_dict.get("store_url")
     if not url:
         return False
 
-    print(f"store_url: {url}")
+    log_print(f"store_url: {url}")
 
     # 2. 準備 RSA 公鑰
     try:
@@ -92,10 +96,10 @@ def push_to_cloud(
         recipient_key = RSA.import_key(key_content)
         cipher = PKCS1_OAEP.new(key=recipient_key, hashAlgo=SHA1)
     except Exception as e:
-        print(f"❌ 公鑰讀取失敗: {e}")
+        log_print(f"❌ 公鑰讀取失敗: {e}")
         return False
 
-    print(f"🚀 開始單筆同步 {dev_name} 數據...")
+    log_print(f"🚀 開始單筆同步 {dev_name} 數據...")
     headers = {"Content-Type": "application/json"}
 
     # 定義 RSA 2048-bit PKCS1_OAEP 的安全長度天花板
@@ -128,7 +132,7 @@ def push_to_cloud(
         current_batch_size = len(chunk)
         if len(json_str) > RSA_MAX_LENGTH and current_batch_size > 1:
             # 如果兩筆太長，就退回只抓一筆
-            print(f"⚠️ 長度為 {len(json_str)} 超標，自動切換為單筆模式...")
+            log_print(f"⚠️ 長度為 {len(json_str)} 超標，自動切換為單筆模式...")
             chunk = [chunk[0]]  # 只取第一筆
             batch_payload = [batch_payload[0]]
             json_str = json.dumps(batch_payload, separators=(",", ":"))
@@ -149,15 +153,13 @@ def push_to_cloud(
             resp = requests.post(url, json=payload, headers=headers, timeout=10)
 
             if resp.status_code == 200:
-                print(
-                    f"  ✅ [{i+1}~{min(end_idx, 20)}/20] 同步成功 (長度: {len(json_str)})"
-                )
+                log_print(f" ✅ [{i+1}~{min(end_idx, 20)}/20] 同步成功 (長度: {len(json_str)})")
             else:
-                print(f"  ⚠️ [{i+1}~{min(end_idx, 20)}/20] 同步異常: {resp.status_code}")
+                log_print(f" ⚠️ [{i+1}~{min(end_idx, 20)}/20] 同步異常: {resp.status_code}")
 
             time.sleep(0.1)
         except Exception as e:
-            print(f"  ❌ [{i+1}/20] 嚴重錯誤: {e} | 長度: {len(json_str)}")
+            log_print(f" ❌ [{i+1}/20] 嚴重錯誤: {e} | 長度: {len(json_str)}")
 
         # 根據實際傳送的筆數增加索引 (可能是 +1 或 +2)
         i += current_batch_size
@@ -233,9 +235,9 @@ def analyze_and_report(
             save_schedule_status(
                 dev_name, period_name, target_date, 2, args.start, args.end
             )
-            print(f"📭 {target_date} {period_name} 時段無日誌數據。")
+            log_print(f"📭 {target_date} {period_name} 時段無日誌數據。")
         else:
-            print(f"📭 {target_date} 無日誌數據。")
+            log_print(f"📭 {target_date} 無日誌數據。")
         return  # 結束執行
 
     # 產生圖表
@@ -268,7 +270,7 @@ def analyze_and_report(
                 save_schedule_status(
                     dev_name, period_name, target_date, 1, args.start, args.end
                 )
-                print(f"✅ {period_name} 狀態已確保更新為 1")
+                log_print(f"✅ {period_name} 狀態已確保更新為 1")
             else:
                 # 否則更新 system_status (每日補發模式)
                 update_system_status(target_display)
@@ -277,9 +279,9 @@ def analyze_and_report(
         report_type = "schedule_event" if period_name else "daily_summary"
         success = push_to_cloud(dev_name, sorted_data, report_type, target_date)
         if success:
-            print(f"✅ {target_display} 已成功同步至雲端")
+            log_print(f"✅ {target_display} 已成功同步至雲端")
 
-    print(msg)
+    log_print(msg)
     conn.close()
 
 

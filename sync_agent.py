@@ -19,6 +19,9 @@ LOCAL_CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 KEY_FILE_PATH = os.path.join(BASE_DIR, 'client_secrets.json')
 TOKEN_PATH = os.path.join(BASE_DIR, 'token.pickle')
 
+def log_print(message):
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
 def load_local_config():
     if not os.path.exists(LOCAL_CONFIG_PATH):
         default_config = {"remote_file_id": "請填入新的ID"}
@@ -50,7 +53,7 @@ def get_remote_config():
     local_settings = load_local_config()
     remote_file_id = local_settings.get("remote_file_id")
     if not remote_file_id:
-        print("⚠️ 警告：請先在本地 config.json 中填寫正確的 remote_file_id")
+        log_print("⚠️ 警告：請先在本地 config.json 中填寫正確的 remote_file_id")
         return {}
     request = service.files().get_media(fileId=remote_file_id)
     fh = io.BytesIO()
@@ -63,12 +66,12 @@ def get_remote_config():
 
 def apply_schedules(remote_config):
     if 'schedules' in remote_config:
-        print(f"📡 成功讀取雲端課表，共計 {len(remote_config['schedules'])} 條規則")
+        log_print(f"📡 成功讀取雲端課表，共計 {len(remote_config['schedules'])} 條規則")
         for sch in remote_config['schedules']:
             # 範例邏輯：列印出目前讀到的設定
-            print(f"裝置: {sch['device']} | 星期: {sch['day']} | 時段: {sch['start']}-{sch['end']}")
+            log_print(f"裝置: {sch['device']} | 星期: {sch['day']} | 時段: {sch['start']}-{sch['end']}")
     else:
-        print("⚠️ 雲端檔案中找不到 'schedules' 欄位")
+        log_print("⚠️ 雲端檔案中找不到 'schedules' 欄位")
 
 
 def sync_git_and_restart():
@@ -79,7 +82,7 @@ def sync_git_and_restart():
     current_user = getpass.getuser()
 
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"🔄 [{now}] 檢查 Git 更新... (執行者: {current_user}, 路徑: {BASE_DIR})")
+    log_print(f"🔄 [{now}] 檢查 Git 更新... (執行者: {current_user}, 路徑: {BASE_DIR})")
     
     try:
         # 💡 終極解法：直接在指令夾帶 -c safe.directory='*' 繞過所有環境變數檢查
@@ -112,40 +115,39 @@ def sync_git_and_restart():
             )
             if token and chat_id:
                 send_tg_message(token, chat_id, update_text)
-            print("🚀 偵測到新版本，執行重啟...")
+            log_print("🚀 偵測到新版本，執行重啟...")
             subprocess.run(['bash', os.path.join(BASE_DIR, 'restart.sh')]) 
             return "UPDATED" # 💡 回傳更新成功
             
         return "NO_CHANGE" # 💡 回傳無須更新
         
     except Exception as e:
-        error_msg = f"❌ [{now}] Git 更新失敗: {e}"
-        print(error_msg)
+        error_msg = f"❌ Git 更新失敗: {e}"
+        log_print(error_msg)
         if token and chat_id:
             send_tg_message(token, chat_id, error_msg)
         return "ERROR"
 
 if __name__ == "__main__":
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n🚀 [{now}] 開始執行同步任務...")
+    log_print(f"\n🚀 開始執行同步任務...")
     try:
         remote_data = get_remote_config()
         with open(LOCAL_CONFIG_PATH, 'w', encoding='utf-8') as f:
             json.dump(remote_data, f, indent=4, ensure_ascii=False)
-        print(f"💾 本地 {LOCAL_CONFIG_PATH} 已更新。")
+        log_print(f"💾 本地 {LOCAL_CONFIG_PATH} 已更新。")
         
         if 'schedules' in remote_data:
-            print(f"📡 成功讀取雲端課表，共計 {len(remote_data['schedules'])} 條規則")
+            log_print(f"📡 成功讀取雲端課表，共計 {len(remote_data['schedules'])} 條規則")
             
         # 💡 根據新的回傳狀態列印日誌
         status = sync_git_and_restart()  
         if status == "UPDATED":
-            print("🚀 系統已完成更新並重啟。")
+            log_print("🚀 系統已完成更新並重啟。")
         elif status == "NO_CHANGE":
-            print("✅ 檢查完成，目前無需更新。")
+            log_print("✅ 檢查完成，目前無需更新。")
         elif status == "ERROR":
-            print("❌ Git 同步發生錯誤，詳情請見 TG 通報。")
+            log_print("❌ Git 同步發生錯誤，詳情請見 TG 通報。")
             
-        print(f"🏁 [{datetime.datetime.now().strftime('%H:%M:%S')}] 同步任務完成。")
+        log_print(f"🏁 [{datetime.datetime.now().strftime('%H:%M:%S')}] 同步任務完成。")
     except Exception as e:
-        print(f"❌ [{now}] 同步失敗: {e}")
+        log_print(f"❌ 同步失敗: {e}")

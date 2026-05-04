@@ -17,6 +17,9 @@ os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
+def log_print(message):
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
 def get_bot_config():
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -28,7 +31,7 @@ def get_bot_config():
         conn.close()
         return (rows[0][0], [str(row[1]) for row in rows]) if rows else (None, [])
     except Exception as e:
-        print(f"get_bot_config ❌ 資料庫讀取失敗: {e}", flush=True)
+        log_print(f"get_bot_config ❌ 資料庫讀取失敗: {e}")
         return None, []
 
 
@@ -44,7 +47,8 @@ def send_tg_message(token, chat_id, text, reply_markup=None):
             payload["reply_markup"] = json.dumps(reply_markup)  # 必須轉為 JSON 字串
         requests.post(url, data=payload, timeout=10)
     except Exception as e:
-        print(f"send_tg_message ❌ 發送失敗: {e}", flush=True)
+        log_print(f"send_tg_message ❌ 發送失敗: {e}")
+        pass
 
 
 def search_domain_stats(keyword, page=0):
@@ -83,7 +87,7 @@ def search_domain_stats(keyword, page=0):
         reply_markup = {"inline_keyboard": keyboard}
         return res, reply_markup
     except Exception as e:
-        print(f"search_domain_stats ❌ 錯誤: {e}", flush=True)
+        log_print(f"search_domain_stats ❌ 錯誤: {e}")
         return "❌ 搜尋時發生錯誤", None
 
 
@@ -131,13 +135,18 @@ def cmd_gemini(token, chat_id, user_states):
     guide_msg = (
         "🤖 *Gemini 模式*\n\n"
         "我現在可以幫您修改程式碼或分析日誌。\n"
-        "請輸入您的指令（例如：`幫我在程式碼頂部加入測試註解`），建議在指令中加入：「請精簡分析，直接列出重點。」"
+        "您可以直接下達自然語言指令，例如：\n"
+        "「`列出專案目錄下所有的 Python 檔案`」\n"
+        "「`幫我在 watcher.py 加入異常連線警示邏輯`」\n"
+        "「`查詢目前的 Git 版本與狀態`」\n"
+        "「`幫我在程式碼頂部加入測試註解`」\n\n"
+        "建議在指令中加入：「`請精簡分析，直接列出重點。`」"
     )
     send_tg_message(token, chat_id, guide_msg, reply_markup)
     return user_states
 
 def cmd_help(token, chat_id, user_states):
-    help_msg = "🤖 *DNS 助理*\n📊 `/report` - 生成報表\n🔍 `/search` - 搜尋網域\n🚫 `/cancel` - 取消操作"
+    help_msg = "🤖 *DNS 助理*\n📊 `/report` - 生成報表\n🔍 `/search` - 搜尋網域\n🤖 `/gemini` - Gemini\n🚫 `/cancel` - 取消操作"
     reply_markup = {
         "inline_keyboard": [
             [
@@ -198,12 +207,7 @@ def cmd_cancel(token, chat_id, user_states):
     reply_markup = {
         "inline_keyboard": [
             [
-                {"text": "📊 生成報表", "callback_data": "report"},
-                {"text": "🔍 搜尋網域", "callback_data": "search"},
-            ],
-            [
-                {"text": "🤖 操作說明", "callback_data": "help"},
-                {"text": "🚫 取消操作", "callback_data": "cancel"},
+                {"text": "🤖 操作說明", "callback_data": "help"}
             ],
         ]
     }
@@ -235,8 +239,6 @@ def handle_command(token, chat_id, text, user_states):
         
         # --- Gemini 邏輯區塊 ---
         if state["type"] == "gemini":
-            # 先將狀態清空，避免使用者重複觸發
-            user_states[chat_id] = {"type": ""} 
             send_tg_message(token, chat_id, "⌛ Gemini 代理人正在執行任務...")
             
             try:
@@ -259,17 +261,21 @@ def handle_command(token, chat_id, text, user_states):
                 response = chat.send_message(input_text)
                 
                 # 安全解析回覆內容
-                if response.text:
-                    reply_text = response.text
-                else:
-                    reply_text = "AI 已完成操作，但未提供文字說明。"
-                
-                send_tg_message(token, chat_id, f"🤖 *代理人回報：*\n\n{reply_text}")
+                reply_text = response.text or "AI 已完成操作，但未提供文字說明。"
+                reply_markup = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "🚫 取消操作", "callback_data": "cancel"},
+                        ],
+                    ]
+                }
+                send_tg_message(token, chat_id, f"🤖 *代理人回報：*\n\n{reply_text}", reply_markup)
 
             except Exception as e:
                 # 統一捕捉所有階段的錯誤並回報給 Telegram
                 error_detail = f"❌ 執行失敗: {str(e)}"
-                print(f"DEBUG: {error_detail}", flush=True) # 終端機也要留紀錄
+                user_states[chat_id] = {"type": ""}
+                log_print(f"handle_command DEBUG: {error_detail}") # 終端機也要留紀錄
                 send_tg_message(token, chat_id, error_detail)
         # --- Gemini 區塊結束 ---
 
@@ -330,7 +336,7 @@ def handle_callback(token, chat_id, callback_query, user_states):
             timeout=5,
         )
     except Exception as e:
-        print(f"handle_callback ❌ 回應按鈕事件失敗: {e}", flush=True)
+        log_print(f"handle_callback ❌ 回應按鈕事件失敗: {e}")
         pass
     return user_states
 
@@ -338,9 +344,9 @@ def handle_callback(token, chat_id, callback_query, user_states):
 def start_polling():
     token, _ = get_bot_config()
     if not token:
-        print("start_polling 🚨 找不到 Token，程式結束。")
+        log_print(f"start_polling 🚨 找不到 Token，程式結束。")
         sys.exit(1)
-    print(f"start_polling 🤖 Bot 已啟動，工作目錄: {BASE_DIR}", flush=True)
+    log_print(f"start_polling 🤖 Bot 已啟動，工作目錄: {BASE_DIR}")
     last_update_id = 0
     error_count = 0
     user_states = {}
@@ -378,10 +384,10 @@ def start_polling():
             error_count += 1
             # 遞增等待機制，最高 60 秒
             wait_time = min(error_count * 10, 60)
-            print(f"start_polling 📡 連線異常 ({error_count}/5): {e}", flush=True)
+            log_print(f"start_polling 📡 連線異常 ({error_count}/5): {e}")
             if error_count >= 5:
-                print(
-                    "start_polling 🚨 連線持續失敗，主動結束進程由 Launchd 重啟。",
+                log_print(
+                    f"start_polling 🚨 連線持續失敗，主動結束進程由 Launchd 重啟。",
                     flush=True,
                 )
                 sys.exit(1)
@@ -410,24 +416,21 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 )
                 conn.commit()
                 conn.close()
-                print(
-                    f"📡 Webhook 補強成功: {dev_name} ({client_ip}) -> {domain}",
-                    flush=True,
-                )
+                log_print(f"📡 Webhook 補強成功: {dev_name} ({client_ip}) -> {domain}")
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(b'{"status":"success"}')
         except Exception as e:
-            print(f"❌ Webhook 處理失敗: {e}", flush=True)
+            log_print(f"❌ Webhook 處理失敗: {e}")
             self.send_response(500)
             self.end_headers()
 
 
 def start_webhook_server():
     server = HTTPServer(("0.0.0.0", 8080), WebhookHandler)
-    print("🌐 Webhook 接收站已啟動 (Port 8080)...", flush=True)
+    log_print(f"🌐 Webhook 接收站已啟動 (Port 8080)...")
     server.serve_forever()
 
 
