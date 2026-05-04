@@ -4,7 +4,7 @@ from pathlib import Path
 from google import genai
 
 # 1. 穩定偵測路徑
-BASE_DIR = Path("/Users/nangei/dns-monitor").resolve()
+BASE_DIR = Path(__file__).resolve().parent.parent 
 CONFIG_PATH = BASE_DIR / "config.json"
 FILE_PATH = BASE_DIR / "watcher.py"
 

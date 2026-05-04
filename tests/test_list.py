@@ -3,7 +3,7 @@ import urllib.request
 from pathlib import Path
 
 # 1. 讀取 API Key
-BASE_DIR = Path("/Users/nangei/dns-monitor").resolve()
+BASE_DIR = Path(__file__).resolve().parent.parent 
 CONFIG_PATH = BASE_DIR / "config.json"
 
 try:
