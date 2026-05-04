@@ -26,7 +26,7 @@ jobs:
     - name: Create config.json
       run: |
         echo '{
-          "api_key": "${{ env.GEMINI_API_KEY }}",
+          "api_key": "${{ secrets.GEMINI_API_KEY }}",
           "model": "gemini-2.5-flash"
         }' > config.json
 
