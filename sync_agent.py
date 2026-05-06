@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import getpass
 import os
 import pickle
@@ -20,7 +20,8 @@ KEY_FILE_PATH = os.path.join(BASE_DIR, 'client_secrets.json')
 TOKEN_PATH = os.path.join(BASE_DIR, 'token.pickle')
 
 def log_print(message):
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"[{now}] {message}", flush=True)
 
 def load_local_config():
     if not os.path.exists(LOCAL_CONFIG_PATH):
@@ -81,8 +82,7 @@ def sync_git_and_restart():
     dev_name = config.get('device_name', 'Unknown')
     current_user = getpass.getuser()
 
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_print(f"🔄 [{now}] 檢查 Git 更新... (執行者: {current_user}, 路徑: {BASE_DIR})")
+    log_print(f"🔄 檢查 Git 更新... (執行者: {current_user}, 路徑: {BASE_DIR})")
     
     try:
         # 💡 終極解法：直接在指令夾帶 -c safe.directory='*' 繞過所有環境變數檢查
@@ -90,7 +90,7 @@ def sync_git_and_restart():
         
         if result.returncode != 0:
             error_report = (
-                f"❌ ** [{now}] Git 同步失敗 ({dev_name})**\n"
+                f"❌ **Git 同步失敗 ({dev_name})**\n"
                 f"━━━━━━━━━━━━\n"
                 f"👤 帳號：`{current_user}`\n"
                 f"📂 路徑：`{BASE_DIR}`\n"
@@ -148,6 +148,6 @@ if __name__ == "__main__":
         elif status == "ERROR":
             log_print("❌ Git 同步發生錯誤，詳情請見 TG 通報。")
             
-        log_print(f"🏁 [{datetime.datetime.now().strftime('%H:%M:%S')}] 同步任務完成。")
+        log_print(f"🏁 同步任務完成。")
     except Exception as e:
         log_print(f"❌ 同步失敗: {e}")

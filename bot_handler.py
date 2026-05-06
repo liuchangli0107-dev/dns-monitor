@@ -18,7 +18,8 @@ DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 def log_print(message):
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"[{now}] {message}", flush=True)
 
 def get_bot_config():
     try:

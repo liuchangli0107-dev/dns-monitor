@@ -26,7 +26,8 @@ DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
 
 def log_print(message):
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    print(f"[{now}] {message}", flush=True)
     
 
 # 更新 SQLite 紀錄表 (自動排程模式才呼叫)
