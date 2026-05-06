@@ -215,6 +215,27 @@ def cmd_cancel(token, chat_id, user_states):
     return user_states
 
 
+def load_system_rules():
+    # 使用 pathlib 確保路徑處理正確
+    base_path = Path(BASE_DIR)
+    host_env_path = base_path / "HOST_ENV.md"
+    project_env_path = base_path / "ENV.md"
+    rules = []
+    
+    # 載入操作規範
+    if host_env_path.exists():
+        rules.append(f"### 操作規範 (HOST_ENV.md):\n{host_env_path.read_text(encoding='utf-8')}")
+    
+    # 載入專案地圖
+    if project_env_path.exists():
+        rules.append(f"### 專案結構地圖 (ENV.md):\n{project_env_path.read_text(encoding='utf-8')}")
+        
+    if not rules:
+        return "你是一個專業的系統助理。"
+    
+    return "\n\n".join(rules)
+
+
 def handle_command(token, chat_id, text, user_states):
     chat_id = str(chat_id)
     _, authorized_chats = get_bot_config()
@@ -246,14 +267,14 @@ def handle_command(token, chat_id, text, user_states):
                 with open(CONFIG_PATH, 'r') as f:
                     config = json.load(f)
                     api_key = config.get("api_key")
-                    model_id = config.get("model", "gemini-2.0-flash")
+                    model_id = config.get("model", "gemini-3.1-flash-lite-preview")
                 
                 client = genai.Client(api_key=api_key)
                 chat = client.chats.create(
                     model=model_id,
                     config={
                         'tools': [run_command, read_local_file, write_local_file],
-                        'system_instruction': "你是一個專業的系統助理..."
+                        'system_instruction': f"請嚴格遵守以下操作規範：\n{load_system_rules()}"
                     }
                 )
                 
@@ -269,7 +290,7 @@ def handle_command(token, chat_id, text, user_states):
                         ],
                     ]
                 }
-                send_tg_message(token, chat_id, f"🤖 *代理人回報：*\n\n{reply_text}", reply_markup)
+                send_tg_message(token, chat_id, f"🤖 *{model_id}代理人回報：*\n\n{reply_text}", reply_markup)
 
             except Exception as e:
                 # 統一捕捉所有階段的錯誤並回報給 Telegram

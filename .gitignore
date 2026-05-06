@@ -8,6 +8,8 @@ Corefile
 *.plist
 *.yaml
 token.pickle
+ENV.md
+HOST_ENV.md
 
 # --- 2. 紀錄與報告 (Logs & Reports) ---
 report/
