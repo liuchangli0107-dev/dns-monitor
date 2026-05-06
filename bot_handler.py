@@ -126,6 +126,8 @@ def write_local_file(path: str, content: str) -> str:
 
 def cmd_gemini(token, chat_id, user_states):
     user_states[chat_id] = {"type": "gemini"}
+    api_key, model_id = get_model_config()
+    model_id = model_id.replace("-", " ").title() if model_id else "Gemini 模型"
     reply_markup = {
         "inline_keyboard": [
             [
@@ -134,8 +136,8 @@ def cmd_gemini(token, chat_id, user_states):
         ]
     }
     guide_msg = (
-        "🤖 *Gemini 模式*\n\n"
-        "我現在可以幫您修改程式碼或分析日誌。\n"
+        f"🤖 *{model_id}*\n\n"
+        "現在可以幫您修改程式碼或分析日誌。\n"
         "您可以直接下達自然語言指令，例如：\n"
         "「`列出專案目錄下所有的 Python 檔案`」\n"
         "「`幫我在 watcher.py 加入異常連線警示邏輯`」\n"
@@ -237,6 +239,17 @@ def load_system_rules():
     return "\n\n".join(rules)
 
 
+def get_model_config(): 
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            api_key = config.get("api_key")
+            model_id = config.get("model", "gemini-3.1-flash-lite-preview")
+            return api_key, model_id
+    except Exception as e:
+        log_print(f"get_model_config ❌ 讀取配置失敗: {e}")
+        return None, "gemini-3.1-flash-lite-preview"
+
 def handle_command(token, chat_id, text, user_states):
     chat_id = str(chat_id)
     _, authorized_chats = get_bot_config()
@@ -265,11 +278,11 @@ def handle_command(token, chat_id, text, user_states):
             
             try:
                 # --- 第一階段：初始化 ---
-                with open(CONFIG_PATH, 'r') as f:
-                    config = json.load(f)
-                    api_key = config.get("api_key")
-                    model_id = config.get("model", "gemini-3.1-flash-lite-preview")
-                
+                api_key, model_id = get_model_config()
+                if not api_key:
+                    send_tg_message(token, chat_id, "❌ API 密鑰未設定。")
+                    return user_states
+
                 client = genai.Client(api_key=api_key)
                 chat = client.chats.create(
                     model=model_id,
@@ -280,10 +293,14 @@ def handle_command(token, chat_id, text, user_states):
                 )
                 
                 # --- 第二階段：傳送指令 ---
+                start_time = time.time()
                 response = chat.send_message(input_text)
+                end_time = time.time()
+                duration = end_time - start_time
                 
                 # 安全解析回覆內容
-                reply_text = response.text or "AI 已完成操作，但未提供文字說明。"
+                texts = [part.text for part in response.candidates[0].content.parts if hasattr(part, 'text') and part.text]
+                reply_text = "".join(texts) if texts else "AI 已完成操作，但未提供文字說明。"
                 reply_markup = {
                     "inline_keyboard": [
                         [
@@ -291,7 +308,7 @@ def handle_command(token, chat_id, text, user_states):
                         ],
                     ]
                 }
-                send_tg_message(token, chat_id, f"🤖 *{model_id}代理人回報：*\n\n{reply_text}", reply_markup)
+                send_tg_message(token, chat_id, f"🤖 *{model_id}代理人回報：*\n\n{reply_text}\n\n⏱️ *回應時間: {duration:.2f}秒*", reply_markup)
 
             except Exception as e:
                 # 統一捕捉所有階段的錯誤並回報給 Telegram
