@@ -18,10 +18,11 @@ DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 LOCAL_CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 KEY_FILE_PATH = os.path.join(BASE_DIR, 'client_secrets.json')
 TOKEN_PATH = os.path.join(BASE_DIR, 'token.pickle')
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
-def log_print(message):
+def log_print(message, **kwargs):
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{now}] {message}", flush=True)
+    print(f"[{now}] {message}", **kwargs)
 
 def load_local_config():
     if not os.path.exists(LOCAL_CONFIG_PATH):
@@ -35,34 +36,57 @@ def load_local_config():
 def get_drive_service():
     creds = None
     if os.path.exists(TOKEN_PATH):
-        with open(TOKEN_PATH, 'rb') as token:
-            creds = pickle.load(token)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                KEY_FILE_PATH, ['https://www.googleapis.com/auth/drive.readonly'])
-            creds = flow.run_local_server(port=0)
+        try:
+            with open(TOKEN_PATH, 'rb') as token:
+                creds = pickle.load(token)
+        except Exception as e:
+            log_print(f"❌ 讀取 token.pickle 失敗: {e}")
+            creds = None
+
+    # Token 不存在：自動嘗試重新獲取
+    if not creds:
+        log_print("🔄 Token 不存在，啟動重新授權流程...")
+        flow = InstalledAppFlow.from_client_secrets_file(KEY_FILE_PATH, SCOPES)
+        creds = flow.run_local_server(port=0)
         with open(TOKEN_PATH, 'wb') as token:
             pickle.dump(creds, token)
+        return build('drive', 'v3', credentials=creds)
+
+    # Token 存在但已過期或無效：直接發送 TG 通知，不嘗試自動刷新
+    if creds.expired or not creds.valid:
+        config = get_device_config()
+        err_msg = f"❌ **Google Drive Token 已失效或過期**\n⚠️ 無法自動刷新，請手動更新憑證。"
+        log_print(err_msg)
+        if config and config.get('telegram_token'):
+            send_tg_message(config.get('telegram_token'), config.get('telegram_chat_id'), err_msg)
+        return None
+
     return build('drive', 'v3', credentials=creds)
 
 
 def get_remote_config():
     service = get_drive_service()
+    if not service:
+        log_print("⚠️ Drive 服務未啟動，無法讀取雲端設定，嘗試讀取本地備份。")
+        return load_local_config()
+    
     local_settings = load_local_config()
     remote_file_id = local_settings.get("remote_file_id")
-    if not remote_file_id:
+    if not remote_file_id or remote_file_id == "請填入新的ID":
         log_print("⚠️ 警告：請先在本地 config.json 中填寫正確的 remote_file_id")
         return {}
-    request = service.files().get_media(fileId=remote_file_id)
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-    return json.loads(fh.getvalue().decode('utf-8'))
+        
+    try:
+        request = service.files().get_media(fileId=remote_file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+        return json.loads(fh.getvalue().decode('utf-8'))
+    except Exception as e:
+        log_print(f"❌ 下載雲端設定檔失敗: {e}")
+        return load_local_config()
 
 
 def apply_schedules(remote_config):

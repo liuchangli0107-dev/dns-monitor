@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 from pathlib import Path
+import socket
 import threading
 import time
 from google import genai
@@ -11,15 +12,15 @@ import sys
 import subprocess
 from datetime import datetime
 
-# 自動偵測目錄，確保三台電腦通用
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
-def log_print(message):
+def log_print(message, **kwargs):
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{now}] {message}", flush=True)
+    kwargs['flush'] = True
+    print(f"[{now}] {message}", **kwargs)
 
 def get_bot_config():
     try:
@@ -361,6 +362,17 @@ def handle_callback(token, chat_id, callback_query, user_states):
                 f"https://api.telegram.org/bot{token}/answerCallbackQuery",
                 data={"callback_query_id": callback_query["id"], "text": "❌ 沒有更多結果了", "show_alert": False}
             )
+
+    if data.startswith("report_p_"):
+        _, _, page_str, target_date, period = data.split("_", 4)
+        period_val = period if period != "none" else None
+        # 改為呼叫編輯模式 (is_edit=True, message_id=...)
+        subprocess.run([
+            sys.executable, "analyzer.py", target_date, 
+            "--page", page_str, 
+            "--period", period_val or "", 
+            "--is_edit", str(callback_query["message"]["message_id"])
+        ])
     if data == "help":
         user_states = cmd_help(token, chat_id, user_states)
     if data == "report":
@@ -386,9 +398,22 @@ def start_polling():
         log_print(f"start_polling 🚨 找不到 Token，程式結束。")
         sys.exit(1)
     log_print(f"start_polling 🤖 Bot 已啟動，工作目錄: {BASE_DIR}")
+    
     last_update_id = 0
     error_count = 0
     user_states = {}
+    
+    try:
+        resp = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", params={"offset": -1}, timeout=10).json()
+        if resp.get("ok") and resp.get("result"):
+            last_update_id = resp["result"][0]["update_id"]
+        else:
+            last_update_id = 0
+    except:
+        last_update_id = 0
+        
+    log_print(f"start_polling 🤖 Bot 已啟動，起始 ID: {last_update_id}")
+    
     while True:
         try:
             url = f"https://api.telegram.org/bot{token}/getUpdates"
@@ -468,12 +493,25 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 
 def start_webhook_server():
-    server = HTTPServer(("0.0.0.0", 8080), WebhookHandler)
-    log_print(f"🌐 Webhook 接收站已啟動 (Port 8080)...")
-    server.serve_forever()
+    try:
+        server = HTTPServer(("127.0.0.1", 8080), WebhookHandler)
+        server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        log_print(f"🌐 Webhook 接收站已啟動 (Port 8080)...")
+        server.serve_forever()
+    except OSError as e:
+        if e.errno == 48:
+            log_print("❌ 錯誤：端口 8080 已被佔用，請先執行清理指令。")
+        else:
+            log_print(f"❌ Webhook Server 啟動失敗: {e}")
 
 
 if __name__ == "__main__":
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    result = sock.connect_ex(('127.0.0.1', 8080))
+    if result == 0:
+        log_print("🚨 致命錯誤：端口 8080 已被佔用，請先清理進程。")
+        sys.exit(1)
+    sock.close()
     t = threading.Thread(target=start_webhook_server, daemon=True)
     t.start()
     start_polling()

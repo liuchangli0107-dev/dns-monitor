@@ -3,9 +3,7 @@ import argparse
 import base64
 import json
 import os
-import site
 import sqlite3
-import sys
 import time
 from datetime import datetime, timedelta
 
@@ -25,10 +23,10 @@ os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
 
-def log_print(message):
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{now}] {message}", flush=True)
-    
+def log_print(message, **kwargs):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{now}] {message}", **kwargs)
+
 
 # 更新 SQLite 紀錄表 (自動排程模式才呼叫)
 def update_system_status(target_date):
@@ -41,7 +39,6 @@ def update_system_status(target_date):
     conn.close()
 
 
-# 供 scheduler 與 analyzer 共用
 def get_current_period(weekly_schedule):
     day_now = datetime.now().strftime("%A")
     time_now = datetime.now().strftime("%H:%M")
@@ -53,14 +50,14 @@ def get_current_period(weekly_schedule):
     return None, None, None
 
 
-def send_telegram(token, chat_id, message, photo_paths=None):
+def send_telegram(token, chat_id, message, photo_paths=None, reply_markup=None):
     if not token or not chat_id:
         return False
     base_url = f"https://api.telegram.org/bot{token}"
-    requests.post(
-        f"{base_url}/sendMessage",
-        json={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"},
-    )
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+    requests.post(f"{base_url}/sendMessage", json=payload)
     if photo_paths:
         for p_path in photo_paths:
             if os.path.exists(p_path):
@@ -154,9 +151,13 @@ def push_to_cloud(
             resp = requests.post(url, json=payload, headers=headers, timeout=10)
 
             if resp.status_code == 200:
-                log_print(f" ✅ [{i+1}~{min(end_idx, 20)}/20] 同步成功 (長度: {len(json_str)})")
+                log_print(
+                    f" ✅ [{i+1}~{min(end_idx, 20)}/20] 同步成功 (長度: {len(json_str)})"
+                )
             else:
-                log_print(f" ⚠️ [{i+1}~{min(end_idx, 20)}/20] 同步異常: {resp.status_code}")
+                log_print(
+                    f" ⚠️ [{i+1}~{min(end_idx, 20)}/20] 同步異常: {resp.status_code}"
+                )
 
             time.sleep(0.1)
         except Exception as e:
@@ -248,42 +249,143 @@ def analyze_and_report(
     if chart_type in ["bar", "both"]:
         photos.append(bar_chart.generate_dns_bar(sorted_data, target_display, dev_name))
 
-    # 組合報表
+    return photos, sorted_data, target_display, dev_name
+
+
+def get_report_msg(sorted_data, page, target_date, period_name, dev_name):
+    per_page = 20
+    total_pages = (len(sorted_data) + (per_page - 1)) // per_page
+    start_idx = page * per_page
+    end_idx = min(start_idx + per_page, len(sorted_data))
+
     display_period = period_name if period_name else "每日總結"
-    msg = f"🛡️ *{dev_name} {display_period} Top 20 通報* ({target_date}):\n"
-    for i, row in enumerate(sorted_data[:20], 1):
+    msg = f"🛡️ *{dev_name} {display_period} 通報* ({target_date}) - 第 {page + 1} 頁:\n"
+    for i, row in enumerate(sorted_data[start_idx:end_idx], start_idx + 1):
         msg += f"{i}. `{row['domain']}` ({row['count']}次)\n"
     msg += f"━━━━━━━━━━━━\n⏰ 執行: {datetime.now().strftime('%H:%M:%S')}"
 
-    if config:
-        # 發送與紀錄
-        success = send_telegram(
-            config["telegram_token"],
-            config["telegram_chat_id"],
-            msg,
-            [p for p in photos if p],
+    if total_pages > 1:
+        msg += f"\n📖 第 {page + 1} / {total_pages} 頁"
+
+    keyboard = []
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            {
+                "text": "⬅️ 上頁",
+                "callback_data": f"report_p_{page-1}_{target_date}_{period_name if period_name else 'none'}",
+            }
+        )
+    if page < total_pages - 1:
+        nav_buttons.append(
+            {
+                "text": "➡️ 下頁",
+                "callback_data": f"report_p_{page+1}_{target_date}_{period_name if period_name else 'none'}",
+            }
+        )
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    reply_markup = {"inline_keyboard": keyboard} if keyboard else None
+    return msg, reply_markup
+
+
+def analyze_and_report(
+    target_date,
+    chart_type="both",
+    record=False,
+    start_t=None,
+    end_t=None,
+    period_name=None,
+    page=0,
+    is_edit=False,
+    message_id=None,
+):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    config = get_device_config()
+    dev_name = config["device_name"] if config else "Unknown"
+
+    if start_t and end_t:
+        start_str = f"{target_date} {start_t}:00"
+        end_str = f"{target_date} {end_t}:59"
+        query = "SELECT domain, COUNT(*) as count FROM dns_logs WHERE timestamp BETWEEN ? AND ? GROUP BY domain"
+        cursor.execute(query, (start_str, end_str))
+    else:
+        cursor.execute(
+            "SELECT domain, COUNT(*) as count FROM dns_logs WHERE timestamp LIKE ? GROUP BY domain",
+            (f"{target_date}%",),
         )
 
-        if success and record:
-            # 如果帶有 period_name，更新 schedule_status (課表模式)
-            if period_name:
-                # 標記為 1 (已成功發送)
-                save_schedule_status(
-                    dev_name, period_name, target_date, 1, args.start, args.end
-                )
-                log_print(f"✅ {period_name} 狀態已確保更新為 1")
-            else:
-                # 否則更新 system_status (每日補發模式)
-                update_system_status(target_display)
+    all_rows = cursor.fetchall()
+    grouped_data = {}
+    for row in all_rows:
+        domain, count = row["domain"], row["count"]
+        final_key, should_skip = process_domain(domain)
+        if should_skip:
+            continue
+        grouped_data[final_key] = grouped_data.get(final_key, 0) + count
 
-        # 同步至雲端
-        report_type = "schedule_event" if period_name else "daily_summary"
-        success = push_to_cloud(dev_name, sorted_data, report_type, target_date)
-        if success:
-            log_print(f"✅ {target_display} 已成功同步至雲端")
-
-    log_print(msg)
+    sorted_data = sorted(
+        [{"domain": k, "count": v} for k, v in grouped_data.items()],
+        key=lambda x: x["count"],
+        reverse=True,
+    )
     conn.close()
+
+    if not sorted_data:
+        log_print("無數據")
+        return
+
+    # 若非編輯模式才做圖，避免重複圖表
+    photos = []
+    if not is_edit:
+        photos = []
+        if chart_type in ["pie", "both"]:
+            photos.append(pie_chart.generate_pie(sorted_data, target_date, dev_name))
+        if chart_type in ["bar", "both"]:
+            photos.append(
+                bar_chart.generate_dns_bar(sorted_data, target_date, dev_name)
+            )
+
+    msg, reply_markup = get_report_msg(
+        sorted_data, page, target_date, period_name, dev_name
+    )
+
+    if config:
+        if is_edit and message_id:
+            # Edit Message Logic
+            url = f"https://api.telegram.org/bot{config['telegram_token']}/editMessageText"
+            requests.post(
+                url,
+                json={
+                    "chat_id": config["telegram_chat_id"],
+                    "message_id": message_id,
+                    "text": msg,
+                    "parse_mode": "Markdown",
+                    "reply_markup": reply_markup,
+                },
+            )
+        else:
+            success = send_telegram(
+                config["telegram_token"],
+                config["telegram_chat_id"],
+                msg,
+                [p for p in photos if p],
+                reply_markup=reply_markup,
+            )
+
+            if success and record:
+                if period_name:
+                    save_schedule_status(
+                        dev_name, period_name, target_date, 1, start_t, end_t
+                    )
+                else:
+                    update_system_status(target_date)
+
+            report_type = "schedule_event" if period_name else "daily_summary"
+            push_to_cloud(dev_name, sorted_data, report_type, target_date)
 
 
 if __name__ == "__main__":
@@ -300,6 +402,8 @@ if __name__ == "__main__":
     parser.add_argument("--start", help="HH:MM")
     parser.add_argument("--end", help="HH:MM")
     parser.add_argument("--period", help="時段名稱")
+    parser.add_argument("--page", type=int, default=0, help="頁碼")
+    parser.add_argument("--is_edit", help="編輯模式訊息ID")
 
     args = parser.parse_args()
 
@@ -311,4 +415,7 @@ if __name__ == "__main__":
         start_t=args.start,
         end_t=args.end,
         period_name=args.period,
+        page=args.page,
+        is_edit=bool(args.is_edit),
+        message_id=args.is_edit,
     )

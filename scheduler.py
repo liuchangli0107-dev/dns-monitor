@@ -11,6 +11,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 DB_PATH = os.path.join(BASE_DIR, "dns_monitor.db")
 
+def log_print(message, **kwargs):
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    kwargs['flush'] = True
+    print(f"[{now}] {message}", **kwargs)
+
 
 def init_scheduler_db():
     conn = sqlite3.connect(DB_PATH)
@@ -64,14 +69,14 @@ def is_already_sent(device_name, period_name, date_str, start_t, end_t):
         status, updated_at = row[0], row[1]
 
         if status >= 1:
-            print(f"✅ 狀態為 {status}，已發送過或無數據，跳過...")
+            log_print(f"✅ 狀態為 {status}，已發送過或無數據，跳過...")
             return True  # 只要是 1 (成功) 或 2 (無數據)，絕對跳過！
 
         # 如果是 0，代表之前嘗試過但沒成功
         # 我們將超時時間拉長到 20 分鐘 (1200秒)，避開 10 分鐘一次的排程衝突
         last_time = datetime.strptime(updated_at, "%Y-%m-%d %H:%M:%S")
         if (datetime.now() - last_time).total_seconds() > 1200:
-            print(f"⚠️ 狀態為 0 且已過 20 分鐘，判定為真崩潰，重啟任務...")
+            log_print(f"⚠️ 狀態為 0 且已過 20 分鐘，判定為真崩潰，重啟任務...")
             # 重新掛號 (更新 updated_at)
             save_schedule_status(device_name, period_name, date_str, 0, start_t, end_t)
             return False
@@ -103,7 +108,7 @@ def manage_smart_schedule():
 
             # 檢查資料庫：是否已發送過
             if not is_already_sent(dev_name, p_name, today_str, start_t, end_t):
-                print(f"🕵️ 偵測到已結束課程: {p_name} ({end_t}) 尚未發報，準備補發...")
+                log_print(f"🕵️ 偵測到已結束課程: {p_name} ({end_t}) 尚未發報，準備補發...")
 
                 # 調用 analyzer 進行完整統計
                 result = subprocess.run(
@@ -122,9 +127,9 @@ def manage_smart_schedule():
                 )
 
                 if result.returncode == 0:
-                    print(f"✅ {p_name} 補發成功")
+                    log_print(f"✅ {p_name} 補發成功")
                 else:
-                    print(f"❌ {p_name} 補發失敗，待下次循環重試")
+                    log_print(f"❌ {p_name} 補發失敗，待下次循環重試")
 
 
 # --- 執行流程 ---
@@ -139,7 +144,7 @@ while current_check <= yesterday:
     target_date = current_check.strftime("%Y-%m-%d")
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if has_logs(target_date):
-        print(f"🕵️ {now_str} 發現缺失日期 {target_date}，啟動補發...")
+        log_print(f"🕵️ {now_str} 發現缺失日期 {target_date}，啟動補發...")
 
         # 調用 analyzer 並帶上 --record 確保紀錄狀態
         subprocess.run(
@@ -153,7 +158,7 @@ while current_check <= yesterday:
             ]
         )
     else:
-        print(f"⏭️ {now_str} 無足夠日誌 {target_date} ，跳過紀錄。")
+        log_print(f"⏭️ {now_str} 無足夠日誌 {target_date} ，跳過紀錄。")
         # 即使沒資料也紀錄，避免下次重複檢查
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
