@@ -10,12 +10,14 @@ Corefile
 token.pickle
 ENV.md
 HOST_ENV.md
+.envrc
 
 # --- 2. 紀錄與報告 (Logs & Reports) ---
 report/
 *.log
 dns_query.log
 notified_history.txt
+last_token_error.txt
 
 # --- 3. Python 暫存檔 (Python Cleanup) ---
 __pycache__/

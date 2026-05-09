@@ -141,9 +141,7 @@ def cmd_gemini(token, chat_id, user_states):
         "現在可以幫您修改程式碼或分析日誌。\n"
         "您可以直接下達自然語言指令，例如：\n"
         "「`列出專案目錄下所有的 Python 檔案`」\n"
-        "「`幫我在 watcher.py 加入異常連線警示邏輯`」\n"
-        "「`查詢目前的 Git 版本與狀態`」\n"
-        "「`幫我在程式碼頂部加入測試註解`」\n\n"
+        "「`幫我讀取 watcher.log 最後20筆日誌`」\n\n"
         "建議在指令中加入：「`請精簡分析，直接列出重點。`」"
     )
     send_tg_message(token, chat_id, guide_msg, reply_markup)

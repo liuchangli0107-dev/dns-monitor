@@ -54,11 +54,21 @@ def get_drive_service():
 
     # Token 存在但已過期或無效：直接發送 TG 通知，不嘗試自動刷新
     if creds.expired or not creds.valid:
+        # 檢查通知間隔，避免轟炸
+        last_notified_path = os.path.join(BASE_DIR, 'last_token_error.txt')
+        if os.path.exists(last_notified_path):
+            with open(last_notified_path, 'r') as f:
+                last_time = f.read()
+                if last_time == datetime.now().strftime('%Y-%m-%d'):
+                    return None
+        
         config = get_device_config()
         err_msg = f"❌ **Google Drive Token 已失效或過期**\n⚠️ 無法自動刷新，請手動更新憑證。"
         log_print(err_msg)
         if config and config.get('telegram_token'):
             send_tg_message(config.get('telegram_token'), config.get('telegram_chat_id'), err_msg)
+            with open(last_notified_path, 'w') as f:
+                f.write(datetime.now().strftime('%Y-%m-%d'))
         return None
 
     return build('drive', 'v3', credentials=creds)
