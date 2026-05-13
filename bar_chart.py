@@ -18,7 +18,8 @@ def generate_dns_bar(data_rows, title_suffix, dev_name):
         os.makedirs(REPORT_DIR)
 
     # 1. 準備繪圖數據 (取前 10 名)
-    labels = [row["domain"] for row in data_rows[:10]]
+    # 移除 domain 中的非 ASCII 字元以避免繪圖警告
+    labels = ["".join(c for c in row["domain"] if ord(c) < 128) for row in data_rows[:10]]
     values = [row["count"] for row in data_rows[:10]]
 
     # === 繪圖設定 (長條圖樣式優化) ===
@@ -37,9 +38,10 @@ def generate_dns_bar(data_rows, title_suffix, dev_name):
     bars = ax.bar(labels, values, color=chart_color, edgecolor="navy", alpha=0.9)
 
     # === 優化視覺效果與對比度 ===
-    # 設定標題 (使用您傳入的時間參數)
+    # 設定標題 (使用您傳入的時間參數，移除 Emoji)
+    clean_title_str = "".join(c for c in f"{dev_name} 網路活動 Top 10 ({title_suffix})" if ord(c) < 128)
     ax.set_title(
-        f"{dev_name} 網路活動 Top 10 ({title_suffix})",
+        clean_title_str,
         fontsize=18,
         pad=20,
         weight="bold",

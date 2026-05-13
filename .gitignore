@@ -11,6 +11,7 @@ token.pickle
 ENV.md
 HOST_ENV.md
 .envrc
+.python-version
 
 # --- 2. 紀錄與報告 (Logs & Reports) ---
 report/

@@ -22,8 +22,10 @@ def generate_pie(data_rows, title_suffix, dev_name):
 
     # 2. 進行數據過濾
     for row in data_rows:
+        # 移除 domain 中的非 ASCII 字元以避免繪圖警告
+        clean_domain = "".join(c for c in row["domain"] if ord(c) < 128)
         if row["count"] >= threshold:
-            d_labels.append(row["domain"])
+            d_labels.append(clean_domain)
             d_values.append(row["count"])
         else:
             others_sum += row["count"]
@@ -46,7 +48,9 @@ def generate_pie(data_rows, title_suffix, dev_name):
         explode=[0.05] * len(d_labels),  # 稍微拉開間距，避免標籤重疊
     )
 
-    plt.title(f"{dev_name} 網路活動比例 ({title_suffix})", fontsize=16)
+    # 處理標題：移除 Emoji (非 ASCII 字元)
+    clean_title_str = "".join(c for c in f"{dev_name} 網路活動比例 ({title_suffix})" if ord(c) < 128)
+    plt.title(clean_title_str, fontsize=16)
     plt.axis("equal")
 
     safe_title = title_suffix.replace(" ", "_").replace(":", "-")
