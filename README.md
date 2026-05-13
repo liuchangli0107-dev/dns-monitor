@@ -241,6 +241,17 @@ truncate -s 0 /Users/$(whoami)/dns-monitor/*.log
     *   系統自動更新通報功能。
 
 ---
-
-**Maintainer**: Charlie Liu
-**Last Updated**: 2026-05-04
+   243|
+   244|### ☁️ 雲端整合架構 (Cloud Backend Integration)
+   245|
+   246|本系統支援將數據分析結果自動同步至雲端平台，實現多設備數據集中管理。
+   247|
+   248|* **架構**: 採用無伺服器 (Serverless) 架構，後端運行於 Google Cloud Run (`asia-east1`)。
+   249|* **存儲**: 數據持久化至 GCS Bucket，並透過 GCS Fuse 掛載至後端。
+   250|* **安全性**: 所有請求需包含 `X-Monitor-Token` Header，並在推送時對 Payload 進行 RSA 加密，確保隱私。
+   251|* **終端點**: 推送數據至雲端 API，支援異地備份與集中式報表查看。
+   252|
+   253|---
+   254|
+   255|**Maintainer**: Charlie Liu
+   256|**Last Updated**: 2026-05-13
