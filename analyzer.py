@@ -73,6 +73,14 @@ def send_telegram(token, chat_id, message, photo_paths=None, reply_markup=None):
 def push_to_cloud(
     dev_name, sorted_data, report_type="schedule_event", recorded_at=None
 ):
+    # 統一將 recorded_at 處理為 YYYY-MM-DD HH:MM:SS
+    if not recorded_at:
+        recorded_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    elif len(recorded_at) == 10:  # 若僅傳入 YYYY-MM-DD
+        recorded_at = f"{recorded_at} 00:00:00"
+    elif len(recorded_at) == 13:  # 若傳入 YYYY-MM-DD HH
+        recorded_at = f"{recorded_at}:00:00"
+
     # 1. 讀取 config.json
     try:
         with open("config.json", "r", encoding="utf-8") as f:
@@ -118,8 +126,6 @@ def push_to_cloud(
                 {
                     "domain": row["domain"],
                     "count": row["count"],
-                    "status": "online",
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )
 
@@ -156,7 +162,7 @@ def push_to_cloud(
                 )
             else:
                 log_print(
-                    f" ⚠️ [{i+1}~{min(end_idx, 20)}/20] 同步異常: {resp.status_code}"
+                    f" ⚠️ [{i+1}~{min(end_idx, 20)}/20] 同步異常: {resp.status_code} | URL: {url} | Payload: {json.dumps(payload, ensure_ascii=False)} | Response: {resp.text}"
                 )
 
             time.sleep(0.1)
@@ -219,7 +225,8 @@ def analyze_and_report(
         domain, count = row["domain"], row["count"]
         final_key, should_skip = process_domain(domain)
 
-        if should_skip:
+        # 這裡過濾掉 AdsTracker 類別，使其不顯示在報表中
+        if should_skip or final_key == "🚫 AdsTracker":
             continue
 
         grouped_data[final_key] = grouped_data.get(final_key, 0) + count
@@ -323,10 +330,12 @@ def analyze_and_report(
     for row in all_rows:
         domain, count = row["domain"], row["count"]
         final_key, should_skip = process_domain(domain)
-        if should_skip:
-            continue
-        grouped_data[final_key] = grouped_data.get(final_key, 0) + count
 
+        # 這裡過濾掉 AdsTracker 類別，使其不顯示在報表中
+        if should_skip or final_key == "🚫 AdsTracker":
+            continue
+
+        grouped_data[final_key] = grouped_data.get(final_key, 0) + count
     sorted_data = sorted(
         [{"domain": k, "count": v} for k, v in grouped_data.items()],
         key=lambda x: x["count"],
