@@ -1,6 +1,7 @@
 # test_logic.py
 from config import DOMAIN_GROUPS
 
+
 def test_github_keywords():
     # 測試 GitHub 關鍵字是否在新的 config 字典中
     github_list = DOMAIN_GROUPS.get("🐙 GitHub", [])

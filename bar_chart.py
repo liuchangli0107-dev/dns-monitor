@@ -1,5 +1,6 @@
-import matplotlib.pyplot as plt
 import os
+
+import matplotlib.pyplot as plt
 
 # 設定 report 資料夾路徑
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

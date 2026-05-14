@@ -239,25 +239,57 @@ def process_domain(domain):
 
 
 def get_device_config():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT telegram_token, telegram_chat_id, device_name FROM devices WHERE ip_address = '127.0.0.1'"
-    )
-    config = cursor.fetchone()
-    conn.close()
-    if config:
-        return {
-            "telegram_token": config["telegram_token"],
-            "telegram_chat_id": config["telegram_chat_id"],
-            "device_name": config["device_name"],
-        }
-    else:
-        with open("config.json", "r", encoding="utf-8") as f:
-            config_data = json.load(f)
-        return {
-            "telegram_token": config_data.get("telegram_token", ""),
-            "telegram_chat_id": config_data.get("telegram_chat_id", ""),
-            "device_name": config_data.get("device_name", "Unknown"),
-        }
+    from init_db import ensure_schema
+
+    for attempt in (0, 1):
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=20)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT telegram_token, telegram_chat_id, device_name FROM devices WHERE ip_address = '127.0.0.1'"
+            )
+            config = cursor.fetchone()
+            conn.close()
+            if config:
+                return {
+                    "telegram_token": config["telegram_token"],
+                    "telegram_chat_id": config["telegram_chat_id"],
+                    "device_name": config["device_name"],
+                }
+            with open("config.json", "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+            return {
+                "telegram_token": config_data.get("telegram_token", ""),
+                "telegram_chat_id": config_data.get("telegram_chat_id", ""),
+                "device_name": config_data.get("device_name", "Unknown"),
+            }
+        except sqlite3.OperationalError:
+            if attempt == 0:
+                ensure_schema(DB_PATH)
+                continue
+            raise
+
+
+def get_bot_config():
+    from init_db import ensure_schema
+
+    for attempt in (0, 1):
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=20)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT telegram_token, telegram_chat_id FROM devices WHERE telegram_token IS NOT NULL"
+            )
+            rows = cur.fetchall()
+            conn.close()
+            return (rows[0][0], [str(row[1]) for row in rows]) if rows else (None, [])
+        except sqlite3.OperationalError:
+            if attempt == 0:
+                ensure_schema(DB_PATH)
+                continue
+            print("get_bot_config ❌ 資料庫讀取失敗 (結構異常)")
+            return None, []
+        except Exception as e:
+            print(f"get_bot_config ❌ 資料庫讀取失敗: {e}")
+            return None, []

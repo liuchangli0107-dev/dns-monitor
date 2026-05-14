@@ -19,6 +19,8 @@ report/
 dns_query.log
 notified_history.txt
 last_token_error.txt
+my_blacklist.txt
+my_whitelist.txt
 
 # --- 3. Python 暫存檔 (Python Cleanup) ---
 __pycache__/

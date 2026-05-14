@@ -1,6 +1,8 @@
-import sqlite3
 import os
+import sqlite3
+
 from analyzer import get_device_config
+
 
 def smoke_test():
     print("🧪 啟動冒煙測試...")

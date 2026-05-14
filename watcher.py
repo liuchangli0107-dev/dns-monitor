@@ -1,10 +1,11 @@
 # Verified by Gemini Agent 2026
 # watcher.py
+import os
 import re
 import sqlite3
-import os
 import subprocess
-import sys
+
+from init_db import ensure_schema
 
 # 設定路徑
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -112,8 +113,5 @@ if __name__ == "__main__":
         with open(LOG_FILE, "w") as f:
             pass
 
-    if not os.path.exists(DB_PATH):
-        print(f"❌ [致命錯誤] 找不到資料庫 {DB_PATH}，請先執行 init_db.py")
-        sys.exit(1)
-
+    ensure_schema(DB_PATH)
     watch_log()

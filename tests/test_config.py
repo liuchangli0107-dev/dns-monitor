@@ -1,6 +1,8 @@
 # tests/test_config.py
 import pytest
+
 from config import process_domain
+
 
 def test_whitelist_filtering():
     # 測試廣告是否正確被過濾

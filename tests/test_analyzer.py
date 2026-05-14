@@ -1,6 +1,8 @@
 # test_analyzer.py
 import pytest
+
 from config import process_domain
+
 
 def test_github_grouping():
     # 測試 GitHub 歸類

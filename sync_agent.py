@@ -1,14 +1,17 @@
-from datetime import datetime
 import getpass
+import io
+import json
 import os
 import pickle
 import subprocess
-import json
-import io
-from google_auth_oauthlib.flow import InstalledAppFlow
+import tempfile
+from datetime import datetime
+
 from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+
 from bot_handler import send_tg_message
 from config import get_device_config
 
@@ -26,9 +29,19 @@ def log_print(message, **kwargs):
 
 def load_local_config():
     if not os.path.exists(LOCAL_CONFIG_PATH):
-        default_config = {"remote_file_id": "請填入新的ID"}
-        with open(LOCAL_CONFIG_PATH, 'w') as f:
-            json.dump(default_config, f, indent=4)
+        # 初始化預設結構
+        default_config = {
+            "device_name": "",
+            "store_url": "",
+            "sync_interval_seconds": 3600,
+            "schedules": [],
+            "remote_file_id": "請填入新的ID"
+        }
+        with tempfile.NamedTemporaryFile('w', dir=os.path.dirname(LOCAL_CONFIG_PATH), delete=False, encoding='utf-8') as tf:
+            json.dump(default_config, tf, indent=4)
+            temp_name = tf.name
+        os.replace(temp_name, LOCAL_CONFIG_PATH)
+        os.chmod(LOCAL_CONFIG_PATH, 0o644)
         return default_config
     with open(LOCAL_CONFIG_PATH, 'r') as f:
         return json.load(f)
@@ -166,8 +179,11 @@ if __name__ == "__main__":
     log_print(f"\n🚀 開始執行同步任務...")
     try:
         remote_data = get_remote_config()
-        with open(LOCAL_CONFIG_PATH, 'w', encoding='utf-8') as f:
-            json.dump(remote_data, f, indent=4, ensure_ascii=False)
+        with tempfile.NamedTemporaryFile('w', dir=os.path.dirname(LOCAL_CONFIG_PATH), delete=False, encoding='utf-8') as tf:
+            json.dump(remote_data, tf, indent=4, ensure_ascii=False)
+            temp_name = tf.name
+        os.replace(temp_name, LOCAL_CONFIG_PATH)
+        os.chmod(LOCAL_CONFIG_PATH, 0o644)
         log_print(f"💾 本地 {LOCAL_CONFIG_PATH} 已更新。")
         
         if 'schedules' in remote_data:

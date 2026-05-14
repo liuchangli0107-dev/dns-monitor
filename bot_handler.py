@@ -1,16 +1,23 @@
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
-from pathlib import Path
+import os
 import socket
+import sqlite3
+import subprocess
+import sys
+import tempfile
 import threading
 import time
-from google import genai
-import requests
-import sqlite3
-import os
-import sys
-import subprocess
 from datetime import datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+import requests
+from google import genai
+
+from analyzer import search_domain_stats
+from analyzer import send_telegram as send_tg_message
+from config import get_bot_config
+from init_db import ensure_schema
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
@@ -22,75 +29,6 @@ def log_print(message, **kwargs):
     kwargs['flush'] = True
     print(f"[{now}] {message}", **kwargs)
 
-def get_bot_config():
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT telegram_token, telegram_chat_id FROM devices WHERE telegram_token IS NOT NULL"
-        )
-        rows = cur.fetchall()
-        conn.close()
-        return (rows[0][0], [str(row[1]) for row in rows]) if rows else (None, [])
-    except Exception as e:
-        log_print(f"get_bot_config ❌ 資料庫讀取失敗: {e}")
-        return None, []
-
-
-def send_tg_message(token, chat_id, text, reply_markup=None):
-    try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown",
-        }
-        if reply_markup:
-            payload["reply_markup"] = json.dumps(reply_markup)  # 必須轉為 JSON 字串
-        requests.post(url, data=payload, timeout=10)
-    except Exception as e:
-        log_print(f"send_tg_message ❌ 發送失敗: {e}")
-        pass
-
-
-def search_domain_stats(keyword, page=0):
-    per_page = 20
-    offset = page * per_page
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        count_query = "SELECT COUNT(*) FROM (SELECT 1 FROM dns_logs WHERE domain LIKE ? GROUP BY strftime('%m-%d %H:%M', timestamp), domain)"
-        cur.execute(count_query, (f"%{keyword.strip()}%",))
-        total_count = cur.fetchone()[0]
-        if total_count == 0:
-            return None, None
-        total_page = (total_count + per_page - 1) // per_page if total_count > 0 else 0
-        query = "SELECT strftime('%m-%d %H:%M', timestamp) AS tm, domain, COUNT(*) FROM dns_logs WHERE domain LIKE ? GROUP BY tm, domain ORDER BY timestamp DESC LIMIT ? OFFSET ?;"
-        cur.execute(query, (f"%{keyword.strip()}%", per_page, offset))
-        rows = cur.fetchall()
-        conn.close()
-        res = f"🔍 *「{keyword}」追蹤 (共 {total_count} 筆)*\n━━━━━━━━━━━━\n"
-        for tm, dom, cnt in rows:
-            res += f"`{tm}` | **{cnt}次**\n└ `{dom[:30]}`\n"
-        res += f"\n━━━━━━━━━━━━\n📖 第 {page+1} / {total_page} 頁\n"
-        keyboard = []
-        nav_buttons = []
-        if total_page > 4:
-            nav_buttons.append({"text": f"⏮️", "callback_data": f"search_p_0_{keyword}"})
-        if page > 0:
-            nav_buttons.append({"text": f"⬅️", "callback_data": f"search_p_{page-1}_{keyword}"})
-        if (offset + per_page) < total_count:
-            nav_buttons.append({"text": f"➡️", "callback_data": f"search_p_{page+1}_{keyword}"})
-        if total_page > 4:
-            nav_buttons.append({"text": f"⏭️", "callback_data": f"search_p_{total_page - 1}_{keyword}"})
-        if nav_buttons:
-            keyboard.append(nav_buttons)
-        keyboard.append([{"text": "🚫 結束搜尋", "callback_data": "cancel"}])
-        reply_markup = {"inline_keyboard": keyboard}
-        return res, reply_markup
-    except Exception as e:
-        log_print(f"search_domain_stats ❌ 錯誤: {e}")
-        return "❌ 搜尋時發生錯誤", None
 
 
 # 執行系統指令並回傳結果 (例如: git version, ls, ps, df)
@@ -119,8 +57,11 @@ def read_local_file(path: str) -> str:
 def write_local_file(path: str, content: str) -> str:
     full_path = os.path.join(BASE_DIR, path)
     try:
-        with open(full_path, 'w', encoding='utf-8') as f:
-            f.write(content)
+        with tempfile.NamedTemporaryFile('w', dir=os.path.dirname(full_path), delete=False, encoding='utf-8') as tf:
+            tf.write(content)
+            temp_name = tf.name
+        os.replace(temp_name, full_path)
+        os.chmod(full_path, 0o644)
         return f"✅ 檔案 {path} 已更新成功。"
     except Exception as e:
         return f"寫入失敗: {str(e)}"
@@ -358,7 +299,8 @@ def handle_callback(token, chat_id, callback_query, user_states):
             # 如果真的沒資料了，彈出一個小通知 (Toast) 提醒即可，不用發新訊息
             requests.post(
                 f"https://api.telegram.org/bot{token}/answerCallbackQuery",
-                data={"callback_query_id": callback_query["id"], "text": "❌ 沒有更多結果了", "show_alert": False}
+                data={"callback_query_id": callback_query["id"], "text": "❌ 沒有更多結果了", "show_alert": False},
+                timeout=10
             )
 
     if data.startswith("report_p_"):
@@ -448,10 +390,7 @@ def start_polling():
             wait_time = min(error_count * 10, 60)
             log_print(f"start_polling 📡 連線異常 ({error_count}/5): {e}")
             if error_count >= 5:
-                log_print(
-                    f"start_polling 🚨 連線持續失敗，主動結束進程由 Launchd 重啟。",
-                    flush=True,
-                )
+                log_print(f"start_polling 🚨 連線持續失敗，主動結束進程由 Launchd 重啟。")
                 sys.exit(1)
             time.sleep(wait_time)
 
@@ -465,7 +404,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
             dev_name = data.get("device", "Unknown")
             domain = data.get("domain")
             if domain:
-                conn = sqlite3.connect(DB_PATH)
+                conn = sqlite3.connect(DB_PATH, timeout=20)
                 cur = conn.cursor()
                 cur.execute(
                     "SELECT ip_address FROM devices WHERE device_name = ?", (dev_name,)
@@ -504,6 +443,7 @@ def start_webhook_server():
 
 
 if __name__ == "__main__":
+    ensure_schema(DB_PATH)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     result = sock.connect_ex(('127.0.0.1', 8080))
     if result == 0:
