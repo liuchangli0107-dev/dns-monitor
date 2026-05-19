@@ -1,6 +1,7 @@
 # --- 1. 敏感資訊 (Security) ---
 Corefile
 *.json
+*.db-journal
 *.db
 *.sh
 *.sql
