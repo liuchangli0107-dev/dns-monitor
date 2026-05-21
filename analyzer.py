@@ -250,8 +250,9 @@ def analyze_and_report(
                     save_schedule_status(
                         dev_name, period_name, target_date, 1, start_t, end_t
                     )
-                else:
+                if not start_t and not end_t:
                     update_system_status(target_date)
+                    log_print(f"✅ 成功推進 system_status 每日總結紀錄至: {target_date}")
 
 
 if __name__ == "__main__":
