@@ -25,6 +25,34 @@ def log_print(message, **kwargs):
     print(f"[{now}] {message}", **kwargs)
 
 
+def clean_old_charts(days=7):
+    """移除指定天數以前的圖檔"""
+    log_print(f"🧹 開始清理 {days} 天前的舊圖檔...")
+    count = 0
+    now = datetime.now()
+    REPORT_DIR = os.path.join(BASE_DIR, "report")
+    if not os.path.exists(REPORT_DIR):
+        log_print(f"⚠️ 報表目錄不存在，跳過清理: {REPORT_DIR}")
+        return
+
+    log_print(f"🧹 開始清理 {days} 天前的舊圖檔於 {REPORT_DIR}...")
+    count = 0
+    now = datetime.now()
+    
+    for filename in os.listdir(REPORT_DIR):
+        if filename.endswith(".png"):
+            file_path = os.path.join(REPORT_DIR, filename)
+            file_mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
+            if now - file_mtime > timedelta(days=days):
+                try:
+                    os.remove(file_path)
+                    log_print(f"🗑️ 已刪除: {filename}")
+                    count += 1
+                except Exception as e:
+                    log_print(f"❌ 刪除失敗 {filename}: {e}")
+    log_print(f"✅ 清理完成，共刪除 {count} 個檔案。")
+
+
 # 更新 SQLite 紀錄表 (自動排程模式才呼叫)
 def update_system_status(target_date):
     conn = sqlite3.connect(DB_PATH, timeout=20)
@@ -166,6 +194,9 @@ def analyze_and_report(
     is_edit=False,
     message_id=None,
 ):
+    # 執行清理
+    clean_old_charts(days=3)
+
     conn = sqlite3.connect(DB_PATH, timeout=20)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
