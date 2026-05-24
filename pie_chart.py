@@ -56,6 +56,11 @@ def generate_pie(data_rows, title_suffix, dev_name):
 
     safe_title = title_suffix.replace(" ", "_").replace(":", "-")
     output_path = os.path.join(REPORT_DIR, f"dns_pie_{safe_title}.png")
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except Exception:
+            pass
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
 

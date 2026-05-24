@@ -78,6 +78,11 @@ def generate_dns_bar(data_rows, title_suffix, dev_name):
     # 將時間字串中的空格換成下底線以利存檔
     safe_time = title_suffix.replace(" ", "_").replace(":", "-")
     output_path = os.path.join(REPORT_DIR, f"dns_bar_{safe_time}.png")
+    if os.path.exists(output_path):
+        try:
+            os.remove(output_path)
+        except Exception:
+            pass
 
     # 4. 存檔
     plt.savefig(output_path, dpi=300)

@@ -82,17 +82,31 @@ def send_telegram(token, chat_id, message, reply_markup=None, photo_paths=None):
     payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
-    requests.post(f"{base_url}/sendMessage", json=payload, timeout=10)
+    
+    try:
+        resp = requests.post(f"{base_url}/sendMessage", json=payload, timeout=10)
+        if resp.status_code != 200:
+            log_print(f"⚠️ Telegram sendMessage failed with status {resp.status_code}: {resp.text}")
+            return False
+    except Exception as e:
+        log_print(f"❌ Telegram sendMessage failed with exception: {e}")
+        return False
+
     if photo_paths:
         for p_path in photo_paths:
             if os.path.exists(p_path):
-                with open(p_path, "rb") as photo:
-                    requests.post(
-                        f"{base_url}/sendPhoto",
-                        data={"chat_id": chat_id},
-                        files={"photo": photo},
-                        timeout=10,
-                    )
+                try:
+                    with open(p_path, "rb") as photo:
+                        resp = requests.post(
+                            f"{base_url}/sendPhoto",
+                            data={"chat_id": chat_id},
+                            files={"photo": photo},
+                            timeout=10,
+                        )
+                        if resp.status_code != 200:
+                            log_print(f"⚠️ Telegram sendPhoto failed with status {resp.status_code}: {resp.text}")
+                except Exception as e:
+                    log_print(f"❌ Telegram sendPhoto failed with exception: {e}")
     return True
 
 
