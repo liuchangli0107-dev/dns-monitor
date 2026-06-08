@@ -2,6 +2,17 @@
 
 這是一套強大的 DNS 監控與管理系統，專為 macOS 環境設計 (iMac 與 MacBook)。它整合了 **CoreDNS** 進行 DNS 請求攔截與過濾，結合 **Python** 背景服務實現 24/7 的流量監測、智能數據分析、自動設備識別，並透過 **Telegram Bot** 及 **雲端同步** 提供多管道的即時通報與數據彙報。從實時攔截惡意網域到生成詳盡的週期性報告，本系統構築了一個全面且具備自我恢復能力的 DNS 安全與洞察體系。
 
+## 📖 目錄
+- [核心功能概覽](#🌟-核心功能概覽)
+- [系統架構詳解](#🛡️-系統架構詳解)
+- [安裝與初始化](#🛠️-安裝與初始化)
+- [服務管理 (Launchd)](#⚙️-服務管理-launchd)
+- [常用指令速查](#⚡-常用指令速查)
+- [日誌維護](#🧹-日誌維護)
+- [數據統計與分析細節](#📊-數據統計與分析細節)
+- [功能更新紀錄](#📈-功能更新紀錄)
+- [雲端整合架構](#☁️-雲端整合架構)
+
 ---
 
 ### 🌟 核心功能概覽
@@ -51,207 +62,114 @@
 *   **本地數據庫 (SQLite - `dns_monitor.db`):**
     *   **角色:** 儲存所有 DNS 查詢日誌、設備信息、排程狀態以及其他系統運行數據。
     *   **關鍵作用:** 輕量級、高效能的數據儲存方案，支援系統的離線操作與數據查詢。
+*   **網域管理輔助工具 (`list_domains.py`):**
+    *   **角色:** 提供快速挖掘並篩選「未分類」或「隱藏」網域的輔助工具。
+    *   **關鍵功能:**
+        *   **智慧篩選:** 整合 `config.py` 的過濾規則，自動排除已知的白名單與 CDN 流量。
+        *   **快速導出:** 將清單導出至 `.txt` 文件，方便進行分類規則的迭代與更新。
+        *   **彈性查詢:** 支援日期篩選或相對天數，精準追蹤特定時段的異常網域。
 *   **macOS 服務管理 (Launchd Plists):**
     *   **角色:** 確保 CoreDNS 和 `watcher.py` 作為系統後台服務自動啟動和運行。
     *   **關鍵功能:** 開機自啟動、故障自動重啟。
 
 ---
 
-## 🛠️ 安裝與初始化
+### 🛠️ 安裝與初始化
 
-### 1. macOS 權限修正 (重要)
-
-由於 macOS 的安全機制，必須對 CoreDNS 二進制檔進行簽署，否則無法透過防火牆接收 Tailscale 設備的 UDP 53 埠請求：
-
+#### 1. macOS 權限修正
 ```bash
 sudo codesign --force --deep --sign - /usr/local/bin/coredns
 ```
 
-### 2. 資料庫初始化
-
-執行以下指令建立所需的資料表並安裝 Python 依賴：
-
+#### 2. 環境建置與初始化
+建議使用專案內建的依賴檔：
 ```bash
 sudo chown -R $(whoami) .
-python3 -m pip install requests pycryptodome matplotlib
+python3 -m pip install -r requirements.txt
 python3 init_db.py
 ```
-
 *註：請至 `dns_monitor.db` 中的 `devices` 資料表填入您的 Telegram `token` 與 `chat_id`。首次啟動時，系統會自動在 `devices` 表為本機建立一筆 IP 為 `127.0.0.1` 的紀錄。*
 
-### 3. 資料庫升級 (重要)
-
-2026-04-25 新增了課表追蹤功能，若您在其他電腦同步代碼，請務必執行升級腳本以建立 `schedule_status` 表：
-
-```bash
-python3 upgrade_db_v2.py
-```
-
-### 4. Google Drive 配置同步 (可選，用於遠程配置管理與自動升級)
-
+#### 3. Google Drive 配置同步 (可選)
 本系統支援從 Google Drive 同步 `config.json`。這允許遠程管理系統配置，並在同步配置的同時檢查 GitHub 上的代碼更新，實現無感升級。
-
 *   **OAuth 2.0 驗證**：初次執行需通過 `client_secrets.json` 授權，並產生永久權杖 `token.pickle` 供背景靜默執行。
-*   **配置範例 (`config.json`)**：
-    ```json
-    {
-        "remote_file_id": "YOUR_GOOGLE_DRIVE_FILE_ID",
-        "schedules": {
-            "Monday": {
-                "Morning_Class": ["08:00", "11:59"],
-                "Afternoon_Study": ["13:00", "17:00"]
-            }
-        },
-        "store_url": "YOUR_CLOUD_RUN_API_ENDPOINT"
-    }
-    ```
-    *`remote_file_id` 為您的 Google Drive 上 `config.json` 文件的 ID。*
 
 ---
 
-## ⚙️ 服務管理 (Launchd)
+### ⚙️ 服務管理 (Launchd)
 
 為了確保開機自動啟動與崩潰自動重啟，系統採用 macOS 標配的 `launchd` 進行管理。
 
-### 核心服務清單
-
+#### 核心服務清單
 *   `com.charlie.coredns.plist`: 負責 CoreDNS 解析服務。
 *   `com.charlie.dns-watcher.plist`: 負責 `watcher.py` 監控腳本。
 *   `com.charlie.dns-scheduler.plist`: 負責 `scheduler.py` 自動排程。
 
-### 啟動與重新載入
-
+#### 啟動指令範例
 ```bash
-# 複製檔案
-sudo cp com.charlie.coredns.plist /Library/LaunchDaemons/com.charlie.coredns.plist
-sudo cp com.charlie.dns-watcher.plist /Library/LaunchDaemons/com.charlie.dns-watcher.plist
-sudo cp com.charlie.dns-scheduler.plist /Library/LaunchDaemons/com.charlie.dns-scheduler.plist
-# 修正擁有者為 root
-sudo chown root:wheel /Library/LaunchDaemons/com.charlie.coredns.plist
-sudo chown root:wheel /Library/LaunchDaemons/com.charlie.dns-watcher.plist
-sudo chown root:wheel /Library/LaunchDaemons/com.charlie.dns-scheduler.plist
-# 修正權限為 644
-sudo chmod 644 /Library/LaunchDaemons/com.charlie.coredns.plist
-sudo chmod 644 /Library/LaunchDaemons/com.charlie.dns-watcher.plist
-sudo chmod 644 /Library/LaunchDaemons/com.charlie.dns-scheduler.plist
-# 載入並啟動服務
-sudo launchctl load -w /Library/LaunchDaemons/com.charlie.coredns.plist
-sudo launchctl load -w /Library/LaunchDaemons/com.charlie.dns-watcher.plist
-sudo launchctl load -w /Library/LaunchDaemons/com.charlie.dns-scheduler.plist
-# 檢查 CoreDNS 狀態
-sudo launchctl list | grep coredns
-# 檢查 Watcher 狀態
-sudo launchctl list | grep dns-watcher
-# 檢查 Scheduler 狀態
-sudo launchctl list | grep dns-scheduler
-```
-
-### 其他指令
-
-```bash
-# 停止背景服務
-sudo launchctl unload /Library/LaunchDaemons/com.charlie.coredns.plist
-
-# 強制殺掉可能殘留的進程
-sudo killall coredns 2>/dev/null
-
-# 重新啟動背景服務
-sudo launchctl load -w /Library/LaunchDaemons/com.charlie.coredns.plist
-
-# 重啟服務
-sudo launchctl kickstart -k system/com.charlie.coredns
-```
-
-### 手動分析數據 (範例)
-
-```bash
-# 手動分析 2026-03-21 當天的所有數據並產出圓餅圖與長條圖
-python3 analyzer.py "2026-03-21" --type both
-
-# 手動分析 2026-03-21 15:00 到 15:59 時段的數據
-python3 analyzer.py "2026-03-21" --start "15:00" --end "15:59" --type both
+# 複製檔案至系統目錄
+sudo cp com.charlie.* /Library/LaunchDaemons/
+# 修正權限
+sudo chown root:wheel /Library/LaunchDaemons/com.charlie.*
+sudo chmod 644 /Library/LaunchDaemons/com.charlie.*
+# 載入服務
+sudo launchctl load -w /Library/LaunchDaemons/com.charlie.*
 ```
 
 ---
 
-## 🧹 日誌維護 (Maintenance)
+### ⚡ 常用指令速查
+
+| 功能 | 指令 |
+| :--- | :--- |
+| **手動分析當日數據** | `python3 analyzer.py "YYYY-MM-DD" --type both` |
+| **篩選未分類網域** | `python3 list_domains.py -d 7` |
+| **清空所有日誌** | `truncate -s 0 *.log` |
+| **查看 CoreDNS 狀態** | `sudo launchctl list \| grep coredns` |
+
+---
+
+### 🧹 日誌維護
 
 隨著運行時間增長，`.log` 檔案會逐漸佔用空間。使用 `truncate` 指令可以在**不停止服務**的情況下，安全地將日誌大小重置為零：
 
 ```bash
-# 清空專案目錄下所有的日誌檔案
 truncate -s 0 /Users/$(whoami)/dns-monitor/*.log
 ```
 
-### 💡 維護小筆記：
-
-如果您希望日誌清理也自動化，可以考慮在 `launchd` 裡多加一個服務，例如每週一凌晨清理一次日誌。
-
-`0 0 * * 1 truncate -s 0 /Users/$(whoami)/dns-monitor/*.log`
-
 ---
 
-## 📊 數據統計與分析細節
+### 📊 數據統計與分析細節
 
 本系統不僅僅是記錄次數，更透過智慧過濾與網域歸類，提供最具閱讀價值的分析報告。
 
-### 1. 智慧網域歸類 (Domain Grouping)
-
-為了避免報表被瑣碎的子網域拆散，系統會自動將性質相近的請求彙整。例如：
-
-*   **Google 教育/協作**: 整合 `classroom.google.com`、`docs.google.com`、`drive.google.com`。
-*   **AI 工具**: 整合 `chatgpt.com` 與 `openai.com`。
-*   **影音串流**: 將 `googlevideo.com`、`ytimg.com` 等背景請求統一併入 **YouTube 服務**。
-*   **開發工具**: 整合 `github.com` 與各式 `githubassets` 資源。
-
-### 2. 雜訊過濾機制 (Noise Filtering)
-
-系統內建強大的白名單 `config.py`，自動剔除以下非人為操作的背景雜訊：
-
-*   **系統通訊**: Apple/Google 設備的背景授權驗證、憑證檢查 (OCSP/CRL)。
-*   **CDN 節點**: 排除 `fastly.net`、`akamai.net` 等底層加速網域。
-*   **廣告與追蹤**: 自動過濾 `doubleclick.net`、`analytics.google.com` 等數據採集請求。
-
-### 3. 可視化報表 (Visualization)
-
-每日報表包含三種維度：
-
-*   **文字通報**: 詳細列出 Top 20 訪問量最高的網域及次數。
-*   **圓餅圖 (Pie Chart)**: 顯示前 10 名的比例分佈，並將低於 2% 的瑣碎項目自動併入「其他」，確保圖表簡潔。
-*   **長條圖 (Bar Chart)**: 針對前 10 大活躍項目進行橫向對比，直觀展現使用重心。
-
-### 4. 狀態管理 (System Status)
-
-分析引擎會將每次「自動執行」的成功紀錄存入 SQLite 的 `system_status` 表。
-* **斷點續傳**: 若電腦關機導致漏發，下次啟動時會自動補發所有缺失日期的報告。
-* **手動隔離**: 手動執行 `analyzer.py` 預設不紀錄狀態，方便隨時進行歷史數據複查。
-
+1.  **智慧網域歸類**: 將性質相近的網域（如 YouTube 相關域名）彙整為單一分類。
+2.  **雜訊過濾機制**: 自動剔除系統通訊、CDN 節點與廣告追蹤器。
+3.  **可視化報表**: 包含文字通報、圓餅圖與長條圖，並自動過濾低頻率瑣碎項目。
+4.  **斷點續傳**: 檢查 `system_status` 表，若發生漏發，下次啟動時會自動補發缺失報告。
 
 ---
 
-## 📈 最新功能與優化 (2026-04-25 後)
+### 📈 功能更新紀錄
 
-*   **課表自動監控 (2026-04-25):** 系統現在會根據 `config.json` 內的時段設定（例如：第一節、數理資優），在時段結束後自動統計該時段內的 DNS 請求，並將數據推送至 Cloud Run。
-*   **Webhook 數據攝入 (2026-04-28):** 為補強瀏覽器 DNS 的運作特性可能導致的數據缺失，系統已建立 Webhook 接口，允許 Chrome 擴充功能等外部應用直接 POST DNS 數據。API 連線超時設置已優化為 (50, 60) 秒。
-*   **Google Drive 配置同步 (2026-04-30):** 支援從 Google Drive 同步 `config.json`，實現遠程配置管理和自動代碼更新。
-*   **報表視覺化與過濾強化 (2026-05-01):**
-    *   Telegram Bot 搜尋功能進化為分頁機制。
-    *   報表與歸類規則更新了視覺化分類符號。
-    *   追蹤器過濾列表新增多個域名。
-    *   系統自動更新通報功能。
+*   **2026-05-01**: 報表視覺化與過濾強化、Telegram Bot 分頁搜尋、系統自動更新。
+*   **2026-04-30**: 支援從 Google Drive 同步 `config.json`。
+*   **2026-04-28**: 新增 Webhook 數據攝入接口。
+*   **2026-04-25**: 新增課表自動監控功能。
+*   **2026-06-07**: 新增網域管理輔助工具功能。
 
 ---
-   243|
-   244|### ☁️ 雲端整合架構 (Cloud Backend Integration)
-   245|
-   246|本系統支援將數據分析結果自動同步至雲端平台，實現多設備數據集中管理。
-   247|
-   248|* **架構**: 採用無伺服器 (Serverless) 架構，後端運行於 Google Cloud Run (`asia-east1`)。
-   249|* **存儲**: 數據持久化至 GCS Bucket，並透過 GCS Fuse 掛載至後端。
-   250|* **安全性**: 所有請求需包含 `X-Monitor-Token` Header，並在推送時對 Payload 進行 RSA 加密，確保隱私。
-   251|* **終端點**: 推送數據至雲端 API，支援異地備份與集中式報表查看。
-   252|
-   253|---
-   254|
-   255|**Maintainer**: Charlie Liu
-   256|**Last Updated**: 2026-05-13
+
+### ☁️ 雲端整合架構 (Cloud Backend Integration)
+
+本系統支援將數據分析結果自動同步至雲端平台，實現多設備數據集中管理。
+
+*   **架構**: 採用無伺服器 (Serverless) 架構，後端運行於 Google Cloud Run (`asia-east1`)。
+*   **存儲**: 數據持久化至 GCS Bucket，並透過 GCS Fuse 掛載至後端。
+*   **安全性**: 所有請求需包含 `X-Monitor-Token` Header，並在推送時對 Payload 進行 RSA 加密，確保隱私。
+*   **終端點**: 推送數據至雲端 API，支援異地備份與集中式報表查看。
+
+---
+
+**Maintainer**: Charlie Liu  
+**Last Updated**: 2026-06-08
